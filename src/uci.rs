@@ -1,4 +1,4 @@
-use crate::engine::{Search, DEFAULT_DEPTH};
+use crate::search::{Search, DEFAULT_DEPTH};
 use chess::{Board, ChessMove, Piece, Square};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
