@@ -6,11 +6,14 @@ use std::str::FromStr;
 const ENGINE_NAME: &str = "rchessengine";
 const ENGINE_AUTHOR: &str = "ruter";
 
-fn handle_position(board: &mut Board, tokens: &[&str]) {
+fn handle_position(board: &mut Board, history: &mut Vec<u64>, tokens: &[&str]) {
     let mut idx = 0;
+
+    history.clear();
 
     if tokens.get(idx) == Some(&"startpos") {
         *board = Board::default();
+        history.push(board.get_hash());
         idx += 1;
     } else if tokens.get(idx) == Some(&"fen") {
         idx += 1;
@@ -19,6 +22,7 @@ fn handle_position(board: &mut Board, tokens: &[&str]) {
         idx += fen_fields.len();
         if let Ok(b) = Board::from_str(&fen) {
             *board = b;
+            history.push(board.get_hash());
         }
     }
 
@@ -28,6 +32,7 @@ fn handle_position(board: &mut Board, tokens: &[&str]) {
             match parse_uci_move(board, mv_str) {
                 Some(m) if board.legal(m) => {
                     *board = board.make_move_new(m);
+                    history.push(board.get_hash());
                 }
                 _ => break, // illegal move from the GUI
             }
@@ -55,7 +60,7 @@ fn parse_uci_move(_board: &Board, s: &str) -> Option<ChessMove> {
     Some(ChessMove::new(source, dest, promotion))
 }
 
-fn handle_go(board: &Board, tokens: &[&str]) {
+fn handle_go(board: &Board, history: &mut Vec<u64>, tokens: &[&str]) {
     let mut depth = DEFAULT_DEPTH;
     let mut i = 0;
     while i < tokens.len() {
@@ -67,7 +72,7 @@ fn handle_go(board: &Board, tokens: &[&str]) {
         i += 1;
     }
 
-    let (best, score, nodes) = search_best_move(board, depth);
+    let (best, score, nodes) = search_best_move(board, depth, history);
 
     eprintln!("info depth {} score cp {} nodes {}", depth, score, nodes);
 
@@ -80,6 +85,7 @@ fn handle_go(board: &Board, tokens: &[&str]) {
 
 pub fn run() {
     let mut board = Board::default();
+    let mut history: Vec<u64> = vec![board.get_hash()];
     let stdin = io::stdin();
 
     for line in stdin.lock().lines() {
@@ -105,12 +111,14 @@ pub fn run() {
             }
             "ucinewgame" => {
                 board = Board::default();
+                history.clear();
+                history.push(board.get_hash());
             }
             "position" => {
-                handle_position(&mut board, &tokens[1..]);
+                handle_position(&mut board, &mut history, &tokens[1..]);
             }
             "go" => {
-                handle_go(&board, &tokens[1..]);
+                handle_go(&board, &mut history, &tokens[1..]);
             }
             "quit" => break,
             _ => {}

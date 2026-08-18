@@ -85,8 +85,16 @@ fn negamax(
     beta: i32,
     ply: i32,
     stats: &mut SearchStats,
+    history: &mut Vec<u64>,
 ) -> i32 {
     stats.nodes += 1;
+
+    // repetitią
+    let current_hash = board.get_hash();
+    let repetitions = history.iter().filter(|&&h| h == current_hash).count();
+    if repetitions >= 2 {
+        return 0; 
+    }
 
     match board.status() {
         BoardStatus::Checkmate => return -MATE_SCORE + ply,
@@ -103,7 +111,10 @@ fn negamax(
     let moves = MoveGen::new_legal(board);
     for m in moves {
         let next = board.make_move_new(m);
-        let score = -negamax(&next, depth - 1, -beta, -alpha, ply + 1, stats);
+
+        history.push(next.get_hash());
+        let score = -negamax(&next, depth - 1, -beta, -alpha, ply + 1, stats, history);
+        history.pop();
 
         if score > best {
             best = score;
@@ -118,7 +129,11 @@ fn negamax(
     best
 }
 
-pub fn search_best_move(board: &Board, depth: u32) -> (Option<ChessMove>, i32, u64) {
+pub fn search_best_move(
+    board: &Board,
+    depth: u32,
+    history: &mut Vec<u64>
+) -> (Option<ChessMove>, i32, u64) {
     let mut stats = SearchStats { nodes: 0 };
     let mut alpha = -INF;
     let beta = INF;
@@ -128,7 +143,10 @@ pub fn search_best_move(board: &Board, depth: u32) -> (Option<ChessMove>, i32, u
 
     for m in MoveGen::new_legal(board) {
         let next = board.make_move_new(m);
-        let score = -negamax(&next, depth.saturating_sub(1), -beta, -alpha, 1, &mut stats);
+
+        history.push(next.get_hash());
+        let score = -negamax(&next, depth.saturating_sub(1), -beta, -alpha, 1, &mut stats, history);
+        history.pop();
 
         if score > best_score || best_move.is_none() {
             best_score = score;
