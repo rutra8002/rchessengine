@@ -1,6 +1,8 @@
 [package]
 name = "rchessengine"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
+authors = ["ruter"]
 
 [dependencies]
+chess = "3.2.0"

@@ -1,3 +1,6 @@
+mod engine;
+mod uci;
+
 fn main() {
-    println!("Hello, world!");
+    uci::run();
 }
