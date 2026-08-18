@@ -43,6 +43,10 @@
 
           cargoLock.lockFile = ./Cargo.lock;
 
+          postInstall = ''
+            mv $out/bin/${name} $out/bin/${name}-${version}
+          '';
+
           meta = {
             inherit author;
           };
@@ -81,7 +85,7 @@
             mkdir -p $out/bin
 
             cp target/x86_64-pc-windows-gnu/release/${name}.exe \
-              $out/bin/${name}.exe
+              $out/bin/${name}-${version}.exe
           '';
 
           meta = {

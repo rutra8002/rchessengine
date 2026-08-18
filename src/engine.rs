@@ -1,8 +1,13 @@
-use chess::{Board, BoardStatus, ChessMove, Color, MoveGen, Piece};
+use chess::{
+    get_bishop_moves, get_king_moves, get_knight_moves, get_rook_moves, get_pawn_moves, Board, BoardStatus,
+    ChessMove, Color, MoveGen, Piece, EMPTY,
+};
 
 pub const DEFAULT_DEPTH: u32 = 6;
 const INF: i32 = i32::MAX / 2;
 const MATE_SCORE: i32 = 900_000;
+
+const MOBILITY_WEIGHT: i32 = 2;
 
 pub struct SearchStats {
     pub nodes: u64,
@@ -19,6 +24,47 @@ fn piece_value(p: Piece) -> i32 {
     }
 }
 
+fn mobility_score(board: &Board) -> i32 {
+    let occupied = *board.combined();
+    let white_pieces = *board.color_combined(Color::White);
+    let black_pieces = *board.color_combined(Color::Black);
+
+    let mut white_mobility = 0i32;
+    let mut black_mobility = 0i32;
+
+    for sq in occupied {
+        let piece = match board.piece_on(sq) {
+            Some(p) => p,
+            None => continue,
+        };
+        let color = board.color_on(sq).unwrap();
+        let own_pieces = if color == Color::White {
+            white_pieces
+        } else {
+            black_pieces
+        };
+
+        let attacks = match piece {
+            Piece::Knight => get_knight_moves(sq),
+            Piece::Bishop => get_bishop_moves(sq, occupied),
+            Piece::Rook => get_rook_moves(sq, occupied),
+            Piece::Queen => get_bishop_moves(sq, occupied) | get_rook_moves(sq, occupied),
+            Piece::King => get_king_moves(sq),
+            Piece::Pawn => EMPTY,
+        };
+
+        let count = (attacks & !own_pieces).popcnt() as i32;
+
+        if color == Color::White {
+            white_mobility += count;
+        } else {
+            black_mobility += count;
+        }
+    }
+
+    white_mobility - black_mobility
+}
+
 fn evaluate(board: &Board) -> i32 {
     let mut score = 0;
     for sq in *board.combined() {
@@ -28,6 +74,7 @@ fn evaluate(board: &Board) -> i32 {
             score += if color == Color::White { v } else { -v };
         }
     }
+    score += MOBILITY_WEIGHT * mobility_score(board);
     score
 }
 
