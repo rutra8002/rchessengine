@@ -1,4 +1,4 @@
-use crate::engine::{search_best_move, DEFAULT_DEPTH};
+use crate::engine::{Search, DEFAULT_DEPTH};
 use chess::{Board, ChessMove, Piece, Square};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
@@ -60,21 +60,37 @@ fn parse_uci_move(_board: &Board, s: &str) -> Option<ChessMove> {
     Some(ChessMove::new(source, dest, promotion))
 }
 
-fn handle_go(board: &Board, history: &mut Vec<u64>, tokens: &[&str]) {
+fn handle_go(
+    board: &Board,
+    history: &mut Vec<u64>,
+    tokens: &[&str],
+    search: &mut Search,
+) {
     let mut depth = DEFAULT_DEPTH;
     let mut i = 0;
     while i < tokens.len() {
         if tokens[i] == "depth" {
-            if let Some(d) = tokens.get(i + 1).and_then(|t| t.parse::<u32>().ok()) {
+            if let Some(d) = tokens
+                .get(i + 1)
+                .and_then(|t| t.parse::<u32>().ok())
+            {
                 depth = d.max(1);
             }
         }
         i += 1;
     }
 
-    let (best, score, nodes) = search_best_move(board, depth, history);
+    let (best, score, nodes, tt_hits, tt_cutoffs) =
+        search.search_best_move(board, depth, history);
 
-    eprintln!("info depth {} score cp {} nodes {}", depth, score, nodes);
+    eprintln!(
+        "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
+        depth,
+        score,
+        nodes,
+        tt_hits,
+        tt_cutoffs
+    );
 
     match best {
         Some(m) => println!("bestmove {}", m),
@@ -86,6 +102,7 @@ fn handle_go(board: &Board, history: &mut Vec<u64>, tokens: &[&str]) {
 pub fn run() {
     let mut board = Board::default();
     let mut history: Vec<u64> = vec![board.get_hash()];
+    let mut search = Search::new();
     let stdin = io::stdin();
 
     for line in stdin.lock().lines() {
@@ -113,12 +130,22 @@ pub fn run() {
                 board = Board::default();
                 history.clear();
                 history.push(board.get_hash());
+                search.clear_tt();
             }
             "position" => {
-                handle_position(&mut board, &mut history, &tokens[1..]);
+                handle_position(
+                    &mut board,
+                    &mut history,
+                    &tokens[1..],
+                );
             }
             "go" => {
-                handle_go(&board, &mut history, &tokens[1..]);
+                handle_go(
+                    &board,
+                    &mut history,
+                    &tokens[1..],
+                    &mut search,
+                );
             }
             "quit" => break,
             _ => {}
