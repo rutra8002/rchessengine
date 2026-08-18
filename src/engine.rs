@@ -3,7 +3,7 @@ use chess::{
     ChessMove, Color, MoveGen, Piece, EMPTY,
 };
 
-pub const DEFAULT_DEPTH: u32 = 6;
+pub const DEFAULT_DEPTH: u32 = 7;
 const INF: i32 = i32::MAX / 2;
 const MATE_SCORE: i32 = 900_000;
 
@@ -97,6 +97,49 @@ fn evaluate(board: &Board) -> i32 {
     score
 }
 
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: i32, stats: &mut SearchStats) -> i32 {
+    stats.nodes += 1;
+
+    match board.status() {
+        BoardStatus::Checkmate => return -MATE_SCORE + ply,
+        BoardStatus::Stalemate => return 0,
+        BoardStatus::Ongoing => {}
+    }
+
+    let stand_pat = {
+        let e = evaluate(board);
+        if board.side_to_move() == Color::White { e } else { -e }
+    };
+
+    if stand_pat >= beta {
+        return beta;
+    }
+    if stand_pat > alpha {
+        alpha = stand_pat;
+    }
+
+    let targets = *board.color_combined(!board.side_to_move());
+    let mut movegen = MoveGen::new_legal(board);
+    movegen.set_iterator_mask(targets);
+
+    let mut captures: Vec<ChessMove> = movegen.collect();
+    captures.sort_by_key(|&m| -move_order_score(board, m));
+
+    for m in captures {
+        let next = board.make_move_new(m);
+        let score = -quiescence(&next, -beta, -alpha, ply + 1, stats);
+
+        if score >= beta {
+            return beta;
+        }
+        if score > alpha {
+            alpha = score;
+        }
+    }
+
+    alpha
+}
+
 fn negamax(
     board: &Board,
     depth: u32,
@@ -112,7 +155,7 @@ fn negamax(
     let current_hash = board.get_hash();
     let repetitions = history.iter().filter(|&&h| h == current_hash).count();
     if repetitions >= 2 {
-        return 0; 
+        return 0;
     }
 
     match board.status() {
@@ -122,8 +165,7 @@ fn negamax(
     }
 
     if depth == 0 {
-        let e = evaluate(board);
-        return if board.side_to_move() == Color::White { e } else { -e };
+        return quiescence(board, alpha, beta, ply, stats);
     }
 
     let mut best = -INF;
