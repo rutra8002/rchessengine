@@ -65,6 +65,25 @@ fn mobility_score(board: &Board) -> i32 {
     white_mobility - black_mobility
 }
 
+
+fn move_order_score(board: &Board, m: ChessMove) -> i32 {
+    if let Some(victim) = board.piece_on(m.get_dest()) {
+        let attacker_value = board
+            .piece_on(m.get_source())
+            .map(piece_value)
+            .unwrap_or(0);
+        10_000 + piece_value(victim) * 10 - attacker_value
+    } else {
+        0
+    }
+}
+
+fn ordered_legal_moves(board: &Board) -> Vec<ChessMove> {
+    let mut moves: Vec<ChessMove> = MoveGen::new_legal(board).collect();
+    moves.sort_by_key(|&m| -move_order_score(board, m));
+    moves
+}
+
 fn evaluate(board: &Board) -> i32 {
     let mut score = 0;
     for sq in *board.combined() {
@@ -108,7 +127,7 @@ fn negamax(
     }
 
     let mut best = -INF;
-    let moves = MoveGen::new_legal(board);
+    let moves = ordered_legal_moves(board);
     for m in moves {
         let next = board.make_move_new(m);
 
@@ -141,7 +160,7 @@ pub fn search_best_move(
     let mut best_move: Option<ChessMove> = None;
     let mut best_score = -INF;
 
-    for m in MoveGen::new_legal(board) {
+    for m in ordered_legal_moves(board) {
         let next = board.make_move_new(m);
 
         history.push(next.get_hash());
