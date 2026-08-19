@@ -136,9 +136,17 @@ fn parse_go_params(tokens: &[&str]) -> GoParams {
     params
 }
 
+fn phase_factor(ply: u32) -> f64 {
+    let ply = ply as f64;
+    0.85 + 0.75 / (1.0 + ply / 18.0)
+}
+
+const MAX_TIME_FRACTION: f64 = 0.33;
+
 fn compute_time_budget(
     params: &GoParams,
     side_to_move: Color,
+    ply: u32,
 ) -> Option<Duration> {
     if let Some(mt) = params.movetime_ms {
         let budget = mt.saturating_sub(SAFETY_MARGIN_MS).max(1);
@@ -157,8 +165,12 @@ fn compute_time_budget(
     let base = time_left / moves_to_go;
     let allocated = base + inc / 2;
 
+    let scaled = (allocated as f64 * phase_factor(ply)) as u64;
+
     let safety_cap = time_left.saturating_sub(SAFETY_MARGIN_MS);
-    let budget_ms = allocated.min(safety_cap).max(1);
+    let hard_cap = (time_left as f64 * MAX_TIME_FRACTION) as u64;
+
+    let budget_ms = scaled.min(safety_cap).min(hard_cap).max(1);
 
     Some(Duration::from_millis(budget_ms))
 }
@@ -179,7 +191,7 @@ fn handle_go(
             let (best, score, nodes, tt_hits, tt_cutoffs) =
                 search.search_best_move(board, depth, history);
 
-            eprintln!(
+            println!(
                 "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
                 depth, score, nodes, tt_hits, tt_cutoffs
             );
@@ -195,13 +207,25 @@ fn handle_go(
 
     let max_depth = params.depth.unwrap_or(MAX_DEPTH).min(MAX_DEPTH);
 
-    let time_budget = compute_time_budget(&params, board.side_to_move())
-        .unwrap_or_else(|| Duration::from_millis(DEFAULT_MOVETIME_MS));
+    let ply = history.len().saturating_sub(1) as u32;
+
+    let time_budget =
+        compute_time_budget(&params, board.side_to_move(), ply)
+            .unwrap_or_else(|| {
+                Duration::from_millis(DEFAULT_MOVETIME_MS)
+            });
+
+    println!(
+        "info string time budget {}ms (ply {}, phase factor {:.2})",
+        time_budget.as_millis(),
+        ply,
+        phase_factor(ply)
+    );
 
     let result =
         search.search_timed(board, max_depth, history, time_budget);
 
-    eprintln!(
+    println!(
         "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
         result.depth_reached,
         result.score,
