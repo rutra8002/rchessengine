@@ -1,4 +1,4 @@
-use chess::{Board, BoardStatus};
+use chess::Board;
 
 use crate::{
     ordering::ordered_legal_moves,
@@ -33,18 +33,6 @@ pub(crate) fn negamax(
 
     if repetitions >= 2 {
         return 0;
-    }
-
-    match board.status() {
-        BoardStatus::Checkmate => {
-            return -MATE_SCORE + ply;
-        }
-
-        BoardStatus::Stalemate => {
-            return 0;
-        }
-
-        BoardStatus::Ongoing => {}
     }
 
     if depth == 0 {
@@ -96,7 +84,11 @@ pub(crate) fn negamax(
     );
 
     if moves.is_empty() {
-        return 0;
+        return if *board.checkers() != chess::EMPTY {
+            -MATE_SCORE + ply
+        } else {
+            0
+        };
     }
 
     let mut best = -INF;
