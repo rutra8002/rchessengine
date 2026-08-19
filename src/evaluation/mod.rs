@@ -14,7 +14,7 @@ pub(crate) fn evaluate(board: &Board) -> i32 {
     let king_safety = king_safety::king_safety_score(board);
     let positional = opening::positional_principles_score(board);
     let endgame = endgame::phase_aware_evaluation(board);
-    material + mobility + king_safety + positional + endgame
+    material + (2*mobility) + king_safety + positional + endgame
 }
 
 pub(crate) fn evaluate_relative(board: &Board) -> i32 {
