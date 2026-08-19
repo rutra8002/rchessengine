@@ -1,10 +1,15 @@
-use crate::search::{Search, DEFAULT_DEPTH};
-use chess::{Board, ChessMove, Piece, Square};
+use crate::search::{Search, MAX_DEPTH};
+use chess::{Board, ChessMove, Color, Piece, Square};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
+use std::time::Duration;
 
 const ENGINE_NAME: &str = "rchessengine";
 const ENGINE_AUTHOR: &str = "ruter";
+
+const SAFETY_MARGIN_MS: u64 = 50;
+
+const DEFAULT_MOVETIME_MS: u64 = 5000;
 
 fn handle_position(board: &mut Board, history: &mut Vec<u64>, tokens: &[&str]) {
     let mut idx = 0;
@@ -60,39 +65,152 @@ fn parse_uci_move(_board: &Board, s: &str) -> Option<ChessMove> {
     Some(ChessMove::new(source, dest, promotion))
 }
 
+struct GoParams {
+    depth: Option<u32>,
+    movetime_ms: Option<u64>,
+    wtime_ms: Option<u64>,
+    btime_ms: Option<u64>,
+    winc_ms: u64,
+    binc_ms: u64,
+    movestogo: Option<u64>,
+}
+
+fn parse_go_params(tokens: &[&str]) -> GoParams {
+    let mut params = GoParams {
+        depth: None,
+        movetime_ms: None,
+        wtime_ms: None,
+        btime_ms: None,
+        winc_ms: 0,
+        binc_ms: 0,
+        movestogo: None,
+    };
+
+    let mut i = 0;
+    while i < tokens.len() {
+        match tokens[i] {
+            "depth" => {
+                params.depth =
+                    tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 1;
+            }
+            "movetime" => {
+                params.movetime_ms =
+                    tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 1;
+            }
+            "wtime" => {
+                params.wtime_ms =
+                    tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 1;
+            }
+            "btime" => {
+                params.btime_ms =
+                    tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 1;
+            }
+            "winc" => {
+                params.winc_ms = tokens
+                    .get(i + 1)
+                    .and_then(|t| t.parse().ok())
+                    .unwrap_or(0);
+                i += 1;
+            }
+            "binc" => {
+                params.binc_ms = tokens
+                    .get(i + 1)
+                    .and_then(|t| t.parse().ok())
+                    .unwrap_or(0);
+                i += 1;
+            }
+            "movestogo" => {
+                params.movestogo =
+                    tokens.get(i + 1).and_then(|t| t.parse().ok());
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    params
+}
+
+fn compute_time_budget(
+    params: &GoParams,
+    side_to_move: Color,
+) -> Option<Duration> {
+    if let Some(mt) = params.movetime_ms {
+        let budget = mt.saturating_sub(SAFETY_MARGIN_MS).max(1);
+        return Some(Duration::from_millis(budget));
+    }
+
+    let (time_left, inc) = match side_to_move {
+        Color::White => (params.wtime_ms, params.winc_ms),
+        Color::Black => (params.btime_ms, params.binc_ms),
+    };
+
+    let time_left = time_left?;
+
+    let moves_to_go = params.movestogo.unwrap_or(30).max(1);
+
+    let base = time_left / moves_to_go;
+    let allocated = base + inc / 2;
+
+    let safety_cap = time_left.saturating_sub(SAFETY_MARGIN_MS);
+    let budget_ms = allocated.min(safety_cap).max(1);
+
+    Some(Duration::from_millis(budget_ms))
+}
+
 fn handle_go(
     board: &Board,
     history: &mut Vec<u64>,
     tokens: &[&str],
     search: &mut Search,
 ) {
-    let mut depth = DEFAULT_DEPTH;
-    let mut i = 0;
-    while i < tokens.len() {
-        if tokens[i] == "depth" {
-            if let Some(d) = tokens
-                .get(i + 1)
-                .and_then(|t| t.parse::<u32>().ok())
-            {
-                depth = d.max(1);
+    let params = parse_go_params(tokens);
+
+    if let Some(depth) = params.depth {
+        if params.wtime_ms.is_none()
+            && params.btime_ms.is_none()
+            && params.movetime_ms.is_none()
+        {
+            let (best, score, nodes, tt_hits, tt_cutoffs) =
+                search.search_best_move(board, depth, history);
+
+            eprintln!(
+                "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
+                depth, score, nodes, tt_hits, tt_cutoffs
+            );
+
+            match best {
+                Some(m) => println!("bestmove {}", m),
+                None => println!("bestmove 0000"),
             }
+            io::stdout().flush().ok();
+            return;
         }
-        i += 1;
     }
 
-    let (best, score, nodes, tt_hits, tt_cutoffs) =
-        search.search_best_move(board, depth, history);
+    let max_depth = params.depth.unwrap_or(MAX_DEPTH).min(MAX_DEPTH);
+
+    let time_budget = compute_time_budget(&params, board.side_to_move())
+        .unwrap_or_else(|| Duration::from_millis(DEFAULT_MOVETIME_MS));
+
+    let result =
+        search.search_timed(board, max_depth, history, time_budget);
 
     eprintln!(
         "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
-        depth,
-        score,
-        nodes,
-        tt_hits,
-        tt_cutoffs
+        result.depth_reached,
+        result.score,
+        result.nodes,
+        result.tt_hits,
+        result.tt_cutoffs
     );
 
-    match best {
+    match result.best_move {
         Some(m) => println!("bestmove {}", m),
         None => println!("bestmove 0000"),
     }

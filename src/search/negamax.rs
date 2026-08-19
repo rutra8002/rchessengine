@@ -25,6 +25,11 @@ pub(crate) fn negamax(
     history: &mut Vec<u64>,
 ) -> i32 {
     stats.nodes += 1;
+    stats.check_time();
+
+    if stats.stopped {
+        return 0;
+    }
 
     let hash = board.get_hash();
 

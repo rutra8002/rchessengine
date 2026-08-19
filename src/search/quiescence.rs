@@ -22,6 +22,11 @@ pub(crate) fn quiescence(
     stats: &mut SearchStats,
 ) -> i32 {
     stats.nodes += 1;
+    stats.check_time();
+
+    if stats.stopped {
+        return 0;
+    }
 
     match board.status() {
         BoardStatus::Checkmate => {
