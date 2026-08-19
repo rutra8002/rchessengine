@@ -117,6 +117,10 @@ pub(crate) fn negamax(
 
         history.pop();
 
+        if stats.stopped {
+            return 0;
+        }
+
         if score > best {
             best = score;
             best_move = Some(m);
@@ -131,21 +135,23 @@ pub(crate) fn negamax(
         }
     }
 
-    let bound = if best <= original_alpha {
-        Bound::Upper
-    } else if best >= beta {
-        Bound::Lower
-    } else {
-        Bound::Exact
-    };
+    if !stats.stopped {
+        let bound = if best <= original_alpha {
+            Bound::Upper
+        } else if best >= beta {
+            Bound::Lower
+        } else {
+            Bound::Exact
+        };
 
-    search.tt.store(
-        hash,
-        depth,
-        best,
-        bound,
-        best_move,
-    );
+        search.tt.store(
+            hash,
+            depth,
+            best,
+            bound,
+            best_move,
+        );
+    }
 
     best
 }
