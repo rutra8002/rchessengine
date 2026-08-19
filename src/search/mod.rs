@@ -13,7 +13,6 @@ use transposition::{
     TranspositionTable,
 };
 
-pub const DEFAULT_DEPTH: u32 = 7;
 pub const MAX_DEPTH: u32 = 64;
 
 const INF: i32 = i32::MAX / 2;
@@ -132,6 +131,8 @@ impl Search {
         let mut best_score = 0;
         let mut depth_reached = 0;
 
+        const MATE_SCORE: i32 = 900_000;
+
         for depth in 1..=max_depth.max(1) {
             if let Some((deadline, budget)) = timing {
                 if depth > 1 && Instant::now() > deadline - budget / 2
@@ -161,6 +162,10 @@ impl Search {
                 best_move = Some(m);
                 best_score = root_score;
                 depth_reached = depth;
+            }
+
+            if root_score > MATE_SCORE - 10000 {
+                break;
             }
 
             eprintln!(
