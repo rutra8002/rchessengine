@@ -1,4 +1,4 @@
-use chess::Board;
+use chess::{Board, Color, Piece, EMPTY};
 
 use crate::{
     ordering::ordered_legal_moves,
@@ -8,6 +8,18 @@ use super::{quiescence::quiescence, transposition::Bound, Search, SearchStats, G
 
 const INF: i32 = i32::MAX / 2;
 const MATE_SCORE: i32 = 900_000;
+
+const NULL_MOVE_R: u32 = 2;
+const NULL_MOVE_MIN_DEPTH: u32 = NULL_MOVE_R + 1;
+
+const LMR_MIN_DEPTH: u32 = 3;
+const LMR_MIN_MOVE_INDEX: usize = 3;
+
+fn has_non_pawn_material(board: &Board, color: Color) -> bool {
+    let pieces = *board.color_combined(color);
+    let pawns_and_king = *board.pieces(Piece::Pawn) | *board.pieces(Piece::King);
+    (pieces & !pawns_and_king).popcnt() > 0
+}
 
 pub(crate) fn negamax(
     search: &mut Search,
@@ -33,20 +45,14 @@ pub(crate) fn negamax(
     }
 
     if depth == 0 {
-        return quiescence(
-            board,
-            alpha,
-            beta,
-            ply,
-            stats,
-        );
+        return quiescence(board, alpha, beta, ply, stats);
     }
+
+    let in_check = *board.checkers() != EMPTY;
 
     let original_alpha = alpha;
 
-    let tt_move = if let Some(entry) =
-        search.tt.probe(hash)
-    {
+    let tt_move = if let Some(entry) = search.tt.probe(hash) {
         if entry.depth >= depth as i16 {
             stats.tt_hits += 1;
 
@@ -74,40 +80,125 @@ pub(crate) fn negamax(
     } else {
         None
     };
+    // null move prune
+    if !in_check
+        && depth >= NULL_MOVE_MIN_DEPTH
+        && beta.abs() < MATE_SCORE - 1000
+        && has_non_pawn_material(board, board.side_to_move())
+    {
+        if let Some(null_board) = board.null_move() {
+            let reduced_depth = depth - 1 - NULL_MOVE_R;
 
-    let moves = ordered_legal_moves(
-        board,
-        tt_move,
-    );
+            history.push(null_board.get_hash());
+
+            let null_score = -negamax(
+                search,
+                &null_board,
+                reduced_depth,
+                -beta,
+                -beta + 1,
+                ply + 1,
+                stats,
+                history,
+            );
+
+            history.pop();
+
+            if stats.stopped {
+                return 0;
+            }
+
+            if null_score >= beta {
+                return beta;
+            }
+        }
+    }
+
+    let moves = ordered_legal_moves(board, tt_move);
 
     if moves.is_empty() {
-        return if *board.checkers() != chess::EMPTY {
-            -MATE_SCORE + ply
-        } else {
-            0
-        };
+        return if in_check { -MATE_SCORE + ply } else { 0 };
     }
 
     let mut best = -INF;
     let mut best_move = None;
+    let mut move_index = 0usize;
 
     for m in moves {
+        let is_capture = board.piece_on(m.get_dest()).is_some();
+
         let next = board.make_move_new(m);
+        let gives_check = *next.checkers() != EMPTY;
 
         history.push(next.get_hash());
 
-        let score = -negamax(
-            search,
-            &next,
-            depth - 1,
-            -beta,
-            -alpha,
-            ply + 1,
-            stats,
-            history,
-        );
+        let score = if move_index == 0 {
+            -negamax(
+                search,
+                &next,
+                depth - 1,
+                -beta,
+                -alpha,
+                ply + 1,
+                stats,
+                history,
+            )
+        } else {
+            // late move reduce
+            let reduce = !is_capture
+                && !gives_check
+                && !in_check
+                && depth >= LMR_MIN_DEPTH
+                && move_index >= LMR_MIN_MOVE_INDEX;
+
+            let reduced_depth = if reduce {
+                (depth - 1).saturating_sub(1)
+            } else {
+                depth - 1
+            };
+
+            let mut s = -negamax(
+                search,
+                &next,
+                reduced_depth,
+                -alpha - 1,
+                -alpha,
+                ply + 1,
+                stats,
+                history,
+            );
+
+            if s > alpha && reduced_depth < depth - 1 {
+                s = -negamax(
+                    search,
+                    &next,
+                    depth - 1,
+                    -beta,
+                    -alpha,
+                    ply + 1,
+                    stats,
+                    history,
+                );
+            }
+
+            if s > alpha && s < beta {
+                s = -negamax(
+                    search,
+                    &next,
+                    depth - 1,
+                    -beta,
+                    -alpha,
+                    ply + 1,
+                    stats,
+                    history,
+                );
+            }
+
+            s
+        };
 
         history.pop();
+        move_index += 1;
 
         if stats.stopped {
             return 0;
