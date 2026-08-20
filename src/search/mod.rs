@@ -1,6 +1,7 @@
 mod negamax;
 mod quiescence;
 mod transposition;
+mod history;
 
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,8 @@ use transposition::{
     Bound,
     TranspositionTable,
 };
+
+pub use history::GameHistory;
 
 pub const MAX_DEPTH: u32 = 64;
 
@@ -83,7 +86,7 @@ impl Search {
         &mut self,
         board: &Board,
         depth: u32,
-        history: &mut Vec<u64>,
+        history: &mut GameHistory,
     ) -> (Option<ChessMove>, i32, u64, u64, u64) {
         let result =
             self.search_iterative(board, depth, history, None);
@@ -101,7 +104,7 @@ impl Search {
         &mut self,
         board: &Board,
         max_depth: u32,
-        history: &mut Vec<u64>,
+        history: &mut GameHistory,
         time_budget: Duration,
     ) -> SearchResult {
         let deadline = Instant::now() + time_budget;
@@ -118,7 +121,7 @@ impl Search {
         &mut self,
         board: &Board,
         max_depth: u32,
-        history: &mut Vec<u64>,
+        history: &mut GameHistory,
         timing: Option<(Instant, Duration)>,
     ) -> SearchResult {
         let deadline = timing.map(|(d, _)| d);
@@ -188,7 +191,7 @@ impl Search {
         &mut self,
         board: &Board,
         depth: u32,
-        history: &mut Vec<u64>,
+        history: &mut GameHistory,
         stats: &mut SearchStats,
     ) -> (Option<ChessMove>, i32) {
         let mut alpha = -INF;

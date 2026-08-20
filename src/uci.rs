@@ -1,4 +1,4 @@
-use crate::search::{Search, MAX_DEPTH};
+use crate::search::{Search, MAX_DEPTH, GameHistory};
 use chess::{Board, ChessMove, Color, Piece, Square};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
@@ -11,7 +11,7 @@ const SAFETY_MARGIN_MS: u64 = 50;
 
 const DEFAULT_MOVETIME_MS: u64 = 5000;
 
-fn handle_position(board: &mut Board, history: &mut Vec<u64>, tokens: &[&str]) {
+fn handle_position(board: &mut Board, history: &mut GameHistory, tokens: &[&str]) {
     let mut idx = 0;
 
     history.clear();
@@ -177,7 +177,7 @@ fn compute_time_budget(
 
 fn handle_go(
     board: &Board,
-    history: &mut Vec<u64>,
+    history: &mut GameHistory,
     tokens: &[&str],
     search: &mut Search,
 ) {
@@ -243,7 +243,8 @@ fn handle_go(
 
 pub fn run() {
     let mut board = Board::default();
-    let mut history: Vec<u64> = vec![board.get_hash()];
+    let mut history = GameHistory::new();
+    history.push(board.get_hash());
     let mut search = Search::new();
     let stdin = io::stdin();
 

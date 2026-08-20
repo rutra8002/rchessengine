@@ -4,12 +4,7 @@ use crate::{
     ordering::ordered_legal_moves,
 };
 
-use super::{
-    quiescence::quiescence,
-    transposition::Bound,
-    Search,
-    SearchStats,
-};
+use super::{quiescence::quiescence, transposition::Bound, Search, SearchStats, GameHistory};
 
 const INF: i32 = i32::MAX / 2;
 const MATE_SCORE: i32 = 900_000;
@@ -22,7 +17,7 @@ pub(crate) fn negamax(
     beta: i32,
     ply: i32,
     stats: &mut SearchStats,
-    history: &mut Vec<u64>,
+    history: &mut GameHistory,
 ) -> i32 {
     stats.nodes += 1;
     stats.check_time();
@@ -33,10 +28,7 @@ pub(crate) fn negamax(
 
     let hash = board.get_hash();
 
-    let repetitions =
-        history.iter().filter(|&&h| h == hash).count();
-
-    if repetitions >= 2 {
+    if history.count(hash) >= 2 {
         return 0;
     }
 
