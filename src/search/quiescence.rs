@@ -3,6 +3,7 @@ use chess::{
     BoardStatus,
     ChessMove,
     MoveGen,
+    EMPTY,
 };
 
 use crate::{
@@ -40,31 +41,35 @@ pub(crate) fn quiescence(
         BoardStatus::Ongoing => {}
     }
 
-    let stand_pat = evaluate_relative(board);
+    let in_check = *board.checkers() != EMPTY;
 
-    if stand_pat >= beta {
-        return beta;
+    if !in_check {
+        let stand_pat = evaluate_relative(board);
+
+        if stand_pat >= beta {
+            return beta;
+        }
+
+        if stand_pat > alpha {
+            alpha = stand_pat;
+        }
     }
 
-    if stand_pat > alpha {
-        alpha = stand_pat;
-    }
+    let mut moves: Vec<ChessMove> = if in_check {
+        MoveGen::new_legal(board).collect()
+    } else {
+        let targets =
+            *board.color_combined(!board.side_to_move());
 
-    let targets =
-        *board.color_combined(!board.side_to_move());
+        let mut movegen = MoveGen::new_legal(board);
 
-    let mut movegen = MoveGen::new_legal(board);
+        movegen.set_iterator_mask(targets);
+        movegen.collect()
+    };
 
-    movegen.set_iterator_mask(targets);
+    moves.sort_unstable_by_key(|&m| -move_order_score(board, m));
 
-    let mut captures: Vec<ChessMove> =
-        movegen.collect();
-
-    captures.sort_unstable_by_key(|&m| {
-        -move_order_score(board, m)
-    });
-
-    for m in captures {
+    for m in moves {
         let next = board.make_move_new(m);
 
         let score = -quiescence(
