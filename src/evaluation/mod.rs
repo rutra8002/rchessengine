@@ -3,6 +3,7 @@ mod mobility;
 mod king_safety;
 mod opening;
 mod endgame;
+mod pst;
 
 use chess::Board;
 
@@ -14,7 +15,8 @@ pub(crate) fn evaluate(board: &Board) -> i32 {
     let king_safety = king_safety::king_safety_score(board);
     let positional = opening::positional_principles_score(board);
     let endgame = endgame::phase_aware_evaluation(board);
-    material + (2*mobility) + king_safety + positional + endgame
+    let pst = pst::pst_score(board);
+    material + (2*mobility) + king_safety + positional + endgame + pst
 }
 
 pub(crate) fn evaluate_relative(board: &Board) -> i32 {
