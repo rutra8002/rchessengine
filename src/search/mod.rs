@@ -28,11 +28,9 @@ pub(crate) const MATE_SCORE: i32 = 67_000_000;
 
 const MATE_THRESHOLD: i32 = MATE_SCORE - 1000;
 
-
 pub fn format_uci_score(score: i32) -> String {
     if score.abs() >= MATE_THRESHOLD {
         let plies_to_mate = MATE_SCORE - score.abs();
-
         let moves_to_mate = (plies_to_mate + 1) / 2;
 
         if score > 0 {
@@ -45,7 +43,7 @@ pub fn format_uci_score(score: i32) -> String {
     }
 }
 
-const TIME_CHECK_INTERVAL: u64 = 2048;
+const TIME_CHECK_INTERVAL: u32 = 2048;
 
 pub struct SearchStats {
     pub nodes: u64,
@@ -53,6 +51,7 @@ pub struct SearchStats {
     pub tt_cutoffs: u64,
     pub(crate) deadline: Option<SearchDeadline>,
     pub(crate) stopped: bool,
+    time_check_counter: u32,
 }
 
 impl SearchStats {
@@ -63,6 +62,7 @@ impl SearchStats {
             tt_cutoffs: 0,
             deadline,
             stopped: false,
+            time_check_counter: TIME_CHECK_INTERVAL,
         }
     }
 
@@ -72,9 +72,13 @@ impl SearchStats {
             return;
         }
 
-        if !self.nodes.is_multiple_of(TIME_CHECK_INTERVAL) {
+        self.time_check_counter -= 1;
+
+        if self.time_check_counter != 0 {
             return;
         }
+
+        self.time_check_counter = TIME_CHECK_INTERVAL;
 
         if let Some(deadline) = self.deadline {
             if deadline.expired() {
@@ -122,7 +126,7 @@ impl Search {
     pub fn set_threads(&mut self, threads: usize) {
         self.threads = threads.max(1);
     }
-    
+
     pub fn clear_tt(&mut self) {
         self.tt.clear();
         self.history_table.clear();
@@ -154,7 +158,6 @@ impl Search {
         time_budget: Duration,
     ) -> SearchResult {
         let deadline = SearchDeadline::new(time_budget);
-
         self.search_iterative_smp(board, max_depth, history, Some(deadline))
     }
 
@@ -184,17 +187,13 @@ impl Search {
                 .zip(worker_histories.iter_mut())
                 .enumerate()
                 .map(|(i, (worker, worker_history))| {
-                    let depth_bump = if deadline.is_some() {
-                        ((i + 1) % 2) as u32
-                    } else {
-                        0
-                    };
-                    let worker_depth = (max_depth + depth_bump).min(MAX_DEPTH);
-
+                    // All LazySMP workers target the requested depth.
+                    // The shared TT is the mechanism that lets later workers
+                    // reuse work instead of artificially searching depth+1.
                     scope.spawn(move || {
                         worker.search_iterative(
                             board,
-                            worker_depth,
+                            max_depth,
                             worker_history,
                             deadline,
                             i + 1,
@@ -203,7 +202,8 @@ impl Search {
                 })
                 .collect();
 
-            let mut best = self.search_iterative(board, max_depth, history, deadline, 0);
+            let mut best =
+                self.search_iterative(board, max_depth, history, deadline, 0);
 
             for handle in handles {
                 if let Ok(result) = handle.join() {
@@ -211,7 +211,9 @@ impl Search {
                     best.tt_hits += result.tt_hits;
                     best.tt_cutoffs += result.tt_cutoffs;
 
-                    if result.best_move.is_some() && result.depth_reached > best.depth_reached {
+                    if result.best_move.is_some()
+                        && result.depth_reached > best.depth_reached
+                    {
                         best.best_move = result.best_move;
                         best.score = result.score;
                         best.depth_reached = result.depth_reached;
@@ -248,8 +250,7 @@ impl Search {
         for depth in 1..=max_depth.max(1) {
             if let Some(deadline) = deadline {
                 if depth > 1
-                    && deadline.remaining()
-                    < Duration::from_millis(50)
+                    && deadline.remaining() < Duration::from_millis(50)
                 {
                     break;
                 }
@@ -257,12 +258,8 @@ impl Search {
 
             let mut stats = SearchStats::new(deadline);
 
-            let (root_move, root_score) = self.search_root(
-                board,
-                depth,
-                history,
-                &mut stats,
-            );
+            let (root_move, root_score) =
+                self.search_root(board, depth, history, &mut stats);
 
             total_nodes += stats.nodes;
             total_tt_hits += stats.tt_hits;
@@ -320,7 +317,7 @@ impl Search {
         let tt_move = self
             .tt
             .probe(hash)
-            .and_then(|entry| entry.best_move);
+            .and_then(|entry| entry.best_move());
 
         let side_to_move = board.side_to_move();
         let killers_here = self.killers[0];

@@ -58,18 +58,24 @@ pub(crate) fn quiescence(
     let mut moves: Vec<ChessMove> = if in_check {
         MoveGen::new_legal(board).collect()
     } else {
-        let targets =
-            *board.color_combined(!board.side_to_move());
-
+        let targets = *board.color_combined(!board.side_to_move());
         let mut movegen = MoveGen::new_legal(board);
 
         movegen.set_iterator_mask(targets);
         movegen.collect()
     };
+    
+    let mut scored: Vec<(ChessMove, i32)> = moves
+        .drain(..)
+        .map(|m| {
+            let score = move_order_score(board, m);
+            (m, score)
+        })
+        .collect();
 
-    moves.sort_unstable_by_key(|&m| -move_order_score(board, m));
+    scored.sort_unstable_by(|a, b| b.1.cmp(&a.1));
 
-    for m in moves {
+    for (m, _) in scored {
         let next = board.make_move_new(m);
 
         let score = -quiescence(
@@ -79,6 +85,10 @@ pub(crate) fn quiescence(
             ply + 1,
             stats,
         );
+
+        if stats.stopped {
+            return 0;
+        }
 
         if score >= beta {
             return beta;

@@ -1,8 +1,6 @@
 use chess::{Board, ChessMove, Color, Piece, EMPTY};
 
-use crate::{
-    ordering::ordered_legal_moves,
-};
+use crate::ordering::ordered_legal_moves;
 
 use super::{
     heuristics::record_killer,
@@ -20,6 +18,7 @@ const NULL_MOVE_MIN_DEPTH: u32 = NULL_MOVE_R + 1;
 const LMR_MIN_DEPTH: u32 = 3;
 const LMR_MIN_MOVE_INDEX: usize = 3;
 
+#[inline]
 fn has_non_pawn_material(board: &Board, color: Color) -> bool {
     let pieces = *board.color_combined(color);
     let pawns_and_king = *board.pieces(Piece::Pawn) | *board.pieces(Piece::King);
@@ -82,11 +81,11 @@ pub(crate) fn negamax(
             }
         }
 
-        entry.best_move
+        entry.best_move()
     } else {
         None
     };
-    // null move prune
+
     if !in_check
         && depth >= NULL_MOVE_MIN_DEPTH
         && beta.abs() < MATE_SCORE - 1000
@@ -172,7 +171,6 @@ pub(crate) fn negamax(
                 history,
             )
         } else {
-            // late move reduce
             let reduce = !is_capture
                 && !gives_check
                 && !in_check
@@ -256,8 +254,7 @@ pub(crate) fn negamax(
 
         if bound == Bound::Lower {
             if let Some(bm) = best_move {
-                let bm_is_capture =
-                    board.piece_on(bm.get_dest()).is_some();
+                let bm_is_capture = board.piece_on(bm.get_dest()).is_some();
 
                 if !bm_is_capture {
                     if let Some(killers_here) =

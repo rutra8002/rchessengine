@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 use rchessengine::search::{GameHistory, Search};
 
+const BENCH_DEPTH: u32 = 10;
+const BENCH_THREADS: usize = 16;
+
 struct BenchPosition {
     name: &'static str,
     fen: &'static str,
@@ -75,13 +78,25 @@ fn next_benchmark_path() -> PathBuf {
     }
 }
 
-fn run_benchmark(depth: u32) -> String {
+fn run_benchmark() -> String {
+    let depth = BENCH_DEPTH;
+
     let mut output = String::new();
 
     output.push_str("rchessengine benchmark\n");
-    output.push_str(&format!("version: {}\n", env!("CARGO_PKG_VERSION")));
+    output.push_str(&format!(
+        "version: {}\n",
+        env!("CARGO_PKG_VERSION")
+    ));
     output.push_str(&format!("depth: {}\n", depth));
-    output.push_str(&format!("positions: {}\n\n", POSITIONS.len()));
+    output.push_str(&format!(
+        "threads: {}\n",
+        BENCH_THREADS
+    ));
+    output.push_str(&format!(
+        "positions: {}\n\n",
+        POSITIONS.len()
+    ));
 
     let suite_start = Instant::now();
 
@@ -102,7 +117,8 @@ fn run_benchmark(depth: u32) -> String {
         // Keep each position isolated so TT contents from one
         // position cannot affect another position's result.
         let mut search = Search::new();
-        search.set_threads(4);
+        search.set_threads(BENCH_THREADS);
+
         let mut history = GameHistory::new();
 
         history.push(board.get_hash());
@@ -173,11 +189,22 @@ fn run_benchmark(depth: u32) -> String {
     output.push_str("==============================\n");
     output.push_str("BENCH COMPLETE\n");
     output.push_str("==============================\n");
+
     output.push_str(&format!(
         "version:      {}\n",
         env!("CARGO_PKG_VERSION")
     ));
-    output.push_str(&format!("depth:        {}\n", depth));
+
+    output.push_str(&format!(
+        "depth:        {}\n",
+        BENCH_DEPTH
+    ));
+
+    output.push_str(&format!(
+        "threads:      {}\n",
+        BENCH_THREADS
+    ));
+
     output.push_str(&format!(
         "positions:    {}\n",
         POSITIONS.len()
@@ -215,17 +242,7 @@ fn run_benchmark(depth: u32) -> String {
 }
 
 fn main() {
-    let depth = env::args()
-        .nth(1)
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(10);
-
-    if depth == 0 {
-        eprintln!("bench depth must be greater than 0");
-        std::process::exit(1);
-    }
-
-    let output = run_benchmark(depth);
+    let output = run_benchmark();
 
     print!("{output}");
 
@@ -249,8 +266,21 @@ fn main() {
 
     writeln!(
         file,
-        "command: cargo bench -- {}",
-        depth
+        "command: cargo bench"
+    )
+        .unwrap();
+
+    writeln!(
+        file,
+        "depth: {}",
+        BENCH_DEPTH
+    )
+        .unwrap();
+
+    writeln!(
+        file,
+        "threads: {}",
+        BENCH_THREADS
     )
         .unwrap();
 

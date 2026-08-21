@@ -1,7 +1,7 @@
 use chess::{ChessMove, File, Piece, Rank, Square};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const TT_BITS: usize = 20;
+const TT_BITS: usize = 21;
 const TT_SIZE: usize = 1 << TT_BITS;
 const TT_MASK: usize = TT_SIZE - 1;
 
@@ -56,7 +56,14 @@ pub(crate) struct TTEntry {
     pub(crate) depth: i16,
     pub(crate) score: i32,
     pub(crate) bound: Bound,
-    pub(crate) best_move: Option<ChessMove>,
+    best_move_bits: u16,
+}
+
+impl TTEntry {
+    #[inline]
+    pub(crate) fn best_move(self) -> Option<ChessMove> {
+        decode_move(self.best_move_bits)
+    }
 }
 
 #[inline]
@@ -99,8 +106,10 @@ fn decode_move(bits: u16) -> Option<ChessMove> {
         _ => None,
     };
 
-    let source = Square::make_square(Rank::from_index(from / 8), File::from_index(from % 8));
-    let dest = Square::make_square(Rank::from_index(to / 8), File::from_index(to % 8));
+    let source =
+        Square::make_square(Rank::from_index(from / 8), File::from_index(from % 8));
+    let dest =
+        Square::make_square(Rank::from_index(to / 8), File::from_index(to % 8));
 
     Some(ChessMove::new(source, dest, promotion))
 }
@@ -112,7 +121,11 @@ fn pack(depth: u32, score: i32, bound: Bound, best_move: Option<ChessMove>) -> u
     let depth_bits = (depth.min(255) as u64) & 0xFF;
     let bound_bits = (bound as u64) & 0x3;
 
-    OCCUPIED_BIT | (bound_bits << 56) | (depth_bits << 48) | (score_bits << 16) | mv
+    OCCUPIED_BIT
+        | (bound_bits << 56)
+        | (depth_bits << 48)
+        | (score_bits << 16)
+        | mv
 }
 
 #[inline]
@@ -126,7 +139,7 @@ fn unpack(data: u64) -> TTEntry {
         depth: depth_bits as i16,
         score: score_bits as i32,
         bound: Bound::from_u8(bound_bits),
-        best_move: decode_move(mv_bits),
+        best_move_bits: mv_bits,
     }
 }
 
@@ -173,7 +186,7 @@ impl TranspositionTable {
         let key_xor_data = slot.key_xor_data.load(Ordering::Relaxed);
 
         if (key_xor_data ^ data) != key {
-            return None; // different position, or a torn concurrent write
+            return None;
         }
 
         Some(unpack(data))
@@ -197,9 +210,15 @@ impl TranspositionTable {
 
             if (existing_kxd ^ existing_data) == key {
                 let existing_depth = (existing_data >> 48) & 0xFF;
-
-                if existing_depth as u32 >= depth {
-                    return; // keep the deeper (or equal) existing entry
+                let existing_bound =
+                    Bound::from_u8(((existing_data >> 56) & 0x3) as u8);
+                
+                if existing_depth as u32 > depth
+                    || (existing_depth as u32 == depth
+                    && existing_bound == Bound::Exact
+                    && bound != Bound::Exact)
+                {
+                    return;
                 }
             }
         }
