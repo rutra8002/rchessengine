@@ -1,4 +1,4 @@
-use crate::search::{Search, MAX_DEPTH, GameHistory};
+use crate::search::{Search, MAX_DEPTH, GameHistory, format_uci_score};
 use chess::{Board, ChessMove, Color, Piece, Square};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
@@ -192,8 +192,8 @@ fn handle_go(
                 search.search_best_move(board, depth, history);
 
             println!(
-                "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
-                depth, score, nodes, tt_hits, tt_cutoffs
+                "info depth {} score {} nodes {} tthits {} ttcutoffs {}",
+                depth, format_uci_score(score), nodes, tt_hits, tt_cutoffs
             );
 
             match best {
@@ -226,9 +226,9 @@ fn handle_go(
         search.search_timed(board, max_depth, history, time_budget);
 
     println!(
-        "info depth {} score cp {} nodes {} tthits {} ttcutoffs {}",
+        "info depth {} score {} nodes {} tthits {} ttcutoffs {}",
         result.depth_reached,
-        result.score,
+        format_uci_score(result.score),
         result.nodes,
         result.tt_hits,
         result.tt_cutoffs
