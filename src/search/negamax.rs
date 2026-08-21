@@ -1,10 +1,11 @@
-use chess::{Board, Color, Piece, EMPTY};
+use chess::{Board, ChessMove, Color, Piece, EMPTY};
 
 use crate::{
     ordering::ordered_legal_moves,
 };
 
 use super::{
+    heuristics::record_killer,
     quiescence::quiescence,
     transposition::{score_from_tt, score_to_tt, Bound},
     Search, SearchStats, GameHistory,
@@ -120,7 +121,19 @@ pub(crate) fn negamax(
         }
     }
 
-    let moves = ordered_legal_moves(board, tt_move);
+    let moves = {
+        let side_to_move = board.side_to_move();
+        let killers_here = search
+            .killers
+            .get(ply as usize)
+            .copied()
+            .unwrap_or([None, None]);
+        let history_table = &search.history_table;
+
+        ordered_legal_moves(board, tt_move, killers_here, |m| {
+            history_table.score(side_to_move, m)
+        })
+    };
 
     if moves.is_empty() {
         return if in_check { -MATE_SCORE + ply } else { 0 };
@@ -129,9 +142,14 @@ pub(crate) fn negamax(
     let mut best = -INF;
     let mut best_move = None;
     let mut move_index = 0usize;
+    let mut quiets_tried: Vec<ChessMove> = Vec::new();
 
     for m in moves {
         let is_capture = board.piece_on(m.get_dest()).is_some();
+
+        if !is_capture {
+            quiets_tried.push(m);
+        }
 
         let next = board.make_move_new(m);
         let gives_check = *next.checkers() != EMPTY;
@@ -232,6 +250,25 @@ pub(crate) fn negamax(
         } else {
             Bound::Exact
         };
+
+        if bound == Bound::Lower {
+            if let Some(bm) = best_move {
+                let bm_is_capture = board.piece_on(bm.get_dest()).is_some();
+
+                if !bm_is_capture {
+                    if let Some(killers_here) = search.killers.get_mut(ply as usize) {
+                        record_killer(killers_here, bm);
+                    }
+
+                    search.history_table.update(
+                        board.side_to_move(),
+                        bm,
+                        &quiets_tried,
+                        depth,
+                    );
+                }
+            }
+        }
 
         search.tt.store(
             hash,

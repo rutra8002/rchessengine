@@ -2,6 +2,7 @@ mod negamax;
 mod quiescence;
 mod transposition;
 mod history;
+mod heuristics;
 
 use std::time::{Duration, Instant};
 
@@ -14,9 +15,13 @@ use transposition::{
     TranspositionTable,
 };
 
+use heuristics::HistoryHeuristic;
+
 pub use history::GameHistory;
 
 pub const MAX_DEPTH: u32 = 64;
+
+const MAX_PLY: usize = MAX_DEPTH as usize + 8;
 
 const INF: i32 = i32::MAX / 2;
 pub(crate) const MATE_SCORE: i32 = 67_000_000;
@@ -80,6 +85,8 @@ impl SearchStats {
 
 pub struct Search {
     tt: TranspositionTable,
+    pub(crate) killers: Vec<[Option<ChessMove>; 2]>,
+    pub(crate) history_table: HistoryHeuristic,
 }
 
 pub struct SearchResult {
@@ -95,11 +102,15 @@ impl Search {
     pub fn new() -> Self {
         Self {
             tt: TranspositionTable::new(),
+            killers: vec![[None, None]; MAX_PLY],
+            history_table: HistoryHeuristic::new(),
         }
     }
 
     pub fn clear_tt(&mut self) {
         self.tt.clear();
+        self.history_table.clear();
+        self.killers.iter_mut().for_each(|k| *k = [None, None]);
     }
 
     pub fn search_best_move(
@@ -145,6 +156,9 @@ impl Search {
         timing: Option<(Instant, Duration)>,
     ) -> SearchResult {
         let deadline = timing.map(|(d, _)| d);
+
+        self.killers.iter_mut().for_each(|k| *k = [None, None]);
+        self.history_table.clear();
 
         let mut total_nodes = 0u64;
         let mut total_tt_hits = 0u64;
@@ -225,7 +239,15 @@ impl Search {
             .probe(hash)
             .and_then(|entry| entry.best_move);
 
-        let moves = ordered_legal_moves(board, tt_move);
+        let side_to_move = board.side_to_move();
+        let killers_here = self.killers[0];
+
+        let moves = {
+            let history_table = &self.history_table;
+            ordered_legal_moves(board, tt_move, killers_here, |m| {
+                history_table.score(side_to_move, m)
+            })
+        };
 
         for m in moves {
             let next = board.make_move_new(m);
