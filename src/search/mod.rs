@@ -4,7 +4,11 @@ mod transposition;
 mod history;
 mod heuristics;
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    mpsc::{self, Receiver, Sender},
+};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use chess::{Board, ChessMove};
@@ -88,13 +92,6 @@ impl SearchStats {
     }
 }
 
-pub struct Search {
-    tt: Arc<TranspositionTable>,
-    pub(crate) killers: Vec<[Option<ChessMove>; 2]>,
-    pub(crate) history_table: HistoryHeuristic,
-    threads: usize,
-}
-
 pub struct SearchResult {
     pub best_move: Option<ChessMove>,
     pub score: i32,
@@ -104,6 +101,36 @@ pub struct SearchResult {
     pub tt_cutoffs: u64,
 }
 
+pub struct Search {
+    tt: Arc<TranspositionTable>,
+    pub(crate) killers: Vec<[Option<ChessMove>; 2]>,
+    pub(crate) history_table: HistoryHeuristic,
+    threads: usize,
+    worker_pool: Option<WorkerPool>,
+}
+
+struct WorkerPool {
+    workers: Vec<Worker>,
+}
+
+struct Worker {
+    tx: Sender<WorkerCommand>,
+    handle: Option<JoinHandle<()>>,
+}
+
+enum WorkerCommand {
+    Search {
+        board: Board,
+        max_depth: u32,
+        history: GameHistory,
+        deadline: Option<SearchDeadline>,
+        worker_id: usize,
+        result_tx: Sender<SearchResult>,
+    },
+
+    Shutdown,
+}
+
 impl Search {
     pub fn new() -> Self {
         Self {
@@ -111,6 +138,7 @@ impl Search {
             killers: vec![[None, None]; MAX_PLY],
             history_table: HistoryHeuristic::new(),
             threads: 1,
+            worker_pool: None,
         }
     }
 
@@ -120,11 +148,25 @@ impl Search {
             killers: vec![[None, None]; MAX_PLY],
             history_table: HistoryHeuristic::new(),
             threads: 1,
+            worker_pool: None,
         }
     }
 
     pub fn set_threads(&mut self, threads: usize) {
-        self.threads = threads.max(1);
+        let threads = threads.max(1);
+
+        if threads == self.threads {
+            return;
+        }
+
+        self.shutdown_workers();
+
+        self.threads = threads;
+
+        if threads > 1 {
+            self.worker_pool =
+                Some(WorkerPool::new(threads - 1, Arc::clone(&self.tt)));
+        }
     }
 
     pub fn clear_tt(&mut self) {
@@ -158,7 +200,13 @@ impl Search {
         time_budget: Duration,
     ) -> SearchResult {
         let deadline = SearchDeadline::new(time_budget);
-        self.search_iterative_smp(board, max_depth, history, Some(deadline))
+
+        self.search_iterative_smp(
+            board,
+            max_depth,
+            history,
+            Some(deadline),
+        )
     }
 
     fn search_iterative_smp(
@@ -171,42 +219,50 @@ impl Search {
         let helper_count = self.threads.saturating_sub(1);
 
         if helper_count == 0 {
-            return self.search_iterative(board, max_depth, history, deadline, 0);
+            return self.search_iterative(
+                board,
+                max_depth,
+                history,
+                deadline,
+                0,
+            );
         }
 
-        let mut helpers: Vec<Search> = (0..helper_count)
-            .map(|_| Search::spawn_worker(Arc::clone(&self.tt)))
-            .collect();
+        let Some(pool) = self.worker_pool.as_ref() else {
+            return self.search_iterative(
+                board,
+                max_depth,
+                history,
+                deadline,
+                0,
+            );
+        };
 
-        let mut worker_histories: Vec<GameHistory> =
-            (0..helper_count).map(|_| history.clone()).collect();
+        let (result_tx, result_rx) = mpsc::channel();
 
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = helpers
-                .iter_mut()
-                .zip(worker_histories.iter_mut())
-                .enumerate()
-                .map(|(i, (worker, worker_history))| {
-                    // All LazySMP workers target the requested depth.
-                    // The shared TT is the mechanism that lets later workers
-                    // reuse work instead of artificially searching depth+1.
-                    scope.spawn(move || {
-                        worker.search_iterative(
-                            board,
-                            max_depth,
-                            worker_history,
-                            deadline,
-                            i + 1,
-                        )
-                    })
-                })
-                .collect();
+        for (i, worker) in pool.workers.iter().enumerate() {
+            let command = WorkerCommand::Search {
+                board: board.clone(),
+                max_depth,
+                history: history.clone(),
+                deadline,
+                worker_id: i + 1,
+                result_tx: result_tx.clone(),
+            };
 
-            let mut best =
-                self.search_iterative(board, max_depth, history, deadline, 0);
+            let _ = worker.tx.send(command);
+        }
 
-            for handle in handles {
-                if let Ok(result) = handle.join() {
+        drop(result_tx);
+
+
+        let mut best =
+            self.search_iterative(board, max_depth, history, deadline, 0);
+
+
+        for _ in 0..helper_count {
+            match result_rx.recv() {
+                Ok(result) => {
                     best.nodes += result.nodes;
                     best.tt_hits += result.tt_hits;
                     best.tt_cutoffs += result.tt_cutoffs;
@@ -219,10 +275,12 @@ impl Search {
                         best.depth_reached = result.depth_reached;
                     }
                 }
-            }
 
-            best
-        })
+                Err(_) => break,
+            }
+        }
+
+        best
     }
 
     fn search_iterative(
@@ -405,5 +463,84 @@ impl Search {
         }
 
         (best_move, best_score)
+    }
+
+    fn shutdown_workers(&mut self) {
+        let Some(mut pool) = self.worker_pool.take() else {
+            return;
+        };
+
+
+        for worker in &pool.workers {
+            let _ = worker.tx.send(WorkerCommand::Shutdown);
+        }
+
+
+        for worker in &mut pool.workers {
+            if let Some(handle) = worker.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+impl Drop for Search {
+    fn drop(&mut self) {
+        self.shutdown_workers();
+    }
+}
+
+impl WorkerPool {
+    fn new(count: usize, tt: Arc<TranspositionTable>) -> Self {
+        let mut workers = Vec::with_capacity(count);
+
+        for worker_id in 0..count {
+            let (tx, rx): (
+                Sender<WorkerCommand>,
+                Receiver<WorkerCommand>,
+            ) = mpsc::channel();
+
+            let worker_tt = Arc::clone(&tt);
+
+            let handle = thread::spawn(move || {
+                let mut search = Search::spawn_worker(worker_tt);
+
+                while let Ok(command) = rx.recv() {
+                    match command {
+                        WorkerCommand::Search {
+                            board,
+                            max_depth,
+                            mut history,
+                            deadline,
+                            worker_id: command_worker_id,
+                            result_tx,
+                        } => {
+                            let result = search.search_iterative(
+                                &board,
+                                max_depth,
+                                &mut history,
+                                deadline,
+                                command_worker_id,
+                            );
+
+                            let _ = result_tx.send(result);
+                        }
+
+                        WorkerCommand::Shutdown => {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let _ = worker_id;
+
+            workers.push(Worker {
+                tx,
+                handle: Some(handle),
+            });
+        }
+
+        Self { workers }
     }
 }

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use rchessengine::search::{GameHistory, Search};
 
 const BENCH_DEPTH: u32 = 10;
-const BENCH_THREADS: usize = 16;
+const BENCH_THREADS: usize = 4;
 
 struct BenchPosition {
     name: &'static str,
