@@ -11,9 +11,7 @@ use crate::{
     ordering::move_order_score,
 };
 
-use super::SearchStats;
-
-const MATE_SCORE: i32 = 900_000;
+use super::{SearchStats, MATE_SCORE};
 
 pub(crate) fn quiescence(
     board: &Board,

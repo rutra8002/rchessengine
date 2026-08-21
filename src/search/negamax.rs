@@ -44,7 +44,7 @@ pub(crate) fn negamax(
 
     let hash = board.get_hash();
 
-    if history.count(hash) >= 2 {
+    if history.count(hash) >= 3 {
         return 0;
     }
 
