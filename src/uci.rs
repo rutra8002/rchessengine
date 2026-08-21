@@ -181,7 +181,7 @@ pub fn run() {
             "uci" => {
                 println!("id name {}", ENGINE_NAME);
                 println!("id author {}", ENGINE_AUTHOR);
-                println!("option name Threads type spin default 1 min 1 max 64");
+                println!("option name Threads type spin default 4 min 1 max 64");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
