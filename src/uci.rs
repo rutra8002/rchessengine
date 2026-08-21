@@ -1,17 +1,18 @@
-use crate::search::{Search, MAX_DEPTH, GameHistory, format_uci_score};
-use chess::{Board, ChessMove, Color, Piece, Square};
+use crate::search::{format_uci_score, GameHistory, Search, MAX_DEPTH};
+use crate::time::{compute_time_budget, parse_go_params, phase_factor};
+
+use chess::{Board, ChessMove, Piece, Square};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
-use std::time::Duration;
 
 const ENGINE_NAME: &str = "rchessengine";
 const ENGINE_AUTHOR: &str = "ruter";
 
-const SAFETY_MARGIN_MS: u64 = 50;
-
-const DEFAULT_MOVETIME_MS: u64 = 5000;
-
-fn handle_position(board: &mut Board, history: &mut GameHistory, tokens: &[&str]) {
+fn handle_position(
+    board: &mut Board,
+    history: &mut GameHistory,
+    tokens: &[&str],
+) {
     let mut idx = 0;
 
     history.clear();
@@ -65,116 +66,6 @@ fn parse_uci_move(_board: &Board, s: &str) -> Option<ChessMove> {
     Some(ChessMove::new(source, dest, promotion))
 }
 
-struct GoParams {
-    depth: Option<u32>,
-    movetime_ms: Option<u64>,
-    wtime_ms: Option<u64>,
-    btime_ms: Option<u64>,
-    winc_ms: u64,
-    binc_ms: u64,
-    movestogo: Option<u64>,
-}
-
-fn parse_go_params(tokens: &[&str]) -> GoParams {
-    let mut params = GoParams {
-        depth: None,
-        movetime_ms: None,
-        wtime_ms: None,
-        btime_ms: None,
-        winc_ms: 0,
-        binc_ms: 0,
-        movestogo: None,
-    };
-
-    let mut i = 0;
-    while i < tokens.len() {
-        match tokens[i] {
-            "depth" => {
-                params.depth =
-                    tokens.get(i + 1).and_then(|t| t.parse().ok());
-                i += 1;
-            }
-            "movetime" => {
-                params.movetime_ms =
-                    tokens.get(i + 1).and_then(|t| t.parse().ok());
-                i += 1;
-            }
-            "wtime" => {
-                params.wtime_ms =
-                    tokens.get(i + 1).and_then(|t| t.parse().ok());
-                i += 1;
-            }
-            "btime" => {
-                params.btime_ms =
-                    tokens.get(i + 1).and_then(|t| t.parse().ok());
-                i += 1;
-            }
-            "winc" => {
-                params.winc_ms = tokens
-                    .get(i + 1)
-                    .and_then(|t| t.parse().ok())
-                    .unwrap_or(0);
-                i += 1;
-            }
-            "binc" => {
-                params.binc_ms = tokens
-                    .get(i + 1)
-                    .and_then(|t| t.parse().ok())
-                    .unwrap_or(0);
-                i += 1;
-            }
-            "movestogo" => {
-                params.movestogo =
-                    tokens.get(i + 1).and_then(|t| t.parse().ok());
-                i += 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    params
-}
-
-fn phase_factor(ply: u32) -> f64 {
-    let ply = ply as f64;
-    0.85 + 0.75 / (1.0 + ply / 18.0)
-}
-
-const MAX_TIME_FRACTION: f64 = 0.33;
-
-fn compute_time_budget(
-    params: &GoParams,
-    side_to_move: Color,
-    ply: u32,
-) -> Option<Duration> {
-    if let Some(mt) = params.movetime_ms {
-        let budget = mt.saturating_sub(SAFETY_MARGIN_MS).max(1);
-        return Some(Duration::from_millis(budget));
-    }
-
-    let (time_left, inc) = match side_to_move {
-        Color::White => (params.wtime_ms, params.winc_ms),
-        Color::Black => (params.btime_ms, params.binc_ms),
-    };
-
-    let time_left = time_left?;
-
-    let moves_to_go = params.movestogo.unwrap_or(30).max(1);
-
-    let base = time_left / moves_to_go;
-    let allocated = base + inc / 2;
-
-    let scaled = (allocated as f64 * phase_factor(ply)) as u64;
-
-    let safety_cap = time_left.saturating_sub(SAFETY_MARGIN_MS);
-    let hard_cap = (time_left as f64 * MAX_TIME_FRACTION) as u64;
-
-    let budget_ms = scaled.min(safety_cap).min(hard_cap).max(1);
-
-    Some(Duration::from_millis(budget_ms))
-}
-
 fn handle_go(
     board: &Board,
     history: &mut GameHistory,
@@ -209,11 +100,11 @@ fn handle_go(
 
     let ply = history.len().saturating_sub(1) as u32;
 
-    let time_budget =
-        compute_time_budget(&params, board.side_to_move(), ply)
-            .unwrap_or_else(|| {
-                Duration::from_millis(DEFAULT_MOVETIME_MS)
-            });
+    let time_budget = compute_time_budget(
+        &params,
+        board.side_to_move(),
+        ply,
+    );
 
     println!(
         "info string time budget {}ms (ply {}, phase factor {:.2})",

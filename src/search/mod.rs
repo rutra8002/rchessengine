@@ -4,11 +4,12 @@ mod transposition;
 mod history;
 mod heuristics;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chess::{Board, ChessMove};
 
 use crate::ordering::ordered_legal_moves;
+use crate::time::SearchDeadline;
 
 use transposition::{
     Bound,
@@ -24,6 +25,7 @@ pub const MAX_DEPTH: u32 = 64;
 const MAX_PLY: usize = MAX_DEPTH as usize + 8;
 
 const INF: i32 = i32::MAX / 2;
+
 pub(crate) const MATE_SCORE: i32 = 67_000_000;
 
 const MATE_THRESHOLD: i32 = MATE_SCORE - 1000;
@@ -50,12 +52,12 @@ pub struct SearchStats {
     pub nodes: u64,
     pub tt_hits: u64,
     pub tt_cutoffs: u64,
-    pub(crate) deadline: Option<Instant>,
+    pub(crate) deadline: Option<SearchDeadline>,
     pub(crate) stopped: bool,
 }
 
 impl SearchStats {
-    fn new(deadline: Option<Instant>) -> Self {
+    fn new(deadline: Option<SearchDeadline>) -> Self {
         Self {
             nodes: 0,
             tt_hits: 0,
@@ -76,7 +78,7 @@ impl SearchStats {
         }
 
         if let Some(deadline) = self.deadline {
-            if Instant::now() >= deadline {
+            if deadline.expired() {
                 self.stopped = true;
             }
         }
@@ -138,13 +140,14 @@ impl Search {
         history: &mut GameHistory,
         time_budget: Duration,
     ) -> SearchResult {
-        let deadline = Instant::now() + time_budget;
+        let deadline =
+            SearchDeadline::new(time_budget);
 
         self.search_iterative(
             board,
             max_depth,
             history,
-            Some((deadline, time_budget)),
+            Some(deadline),
         )
     }
 
@@ -153,24 +156,28 @@ impl Search {
         board: &Board,
         max_depth: u32,
         history: &mut GameHistory,
-        timing: Option<(Instant, Duration)>,
+        deadline: Option<SearchDeadline>,
     ) -> SearchResult {
-        let deadline = timing.map(|(d, _)| d);
+        self.killers
+            .iter_mut()
+            .for_each(|k| *k = [None, None]);
 
-        self.killers.iter_mut().for_each(|k| *k = [None, None]);
         self.history_table.clear();
 
         let mut total_nodes = 0u64;
         let mut total_tt_hits = 0u64;
         let mut total_tt_cutoffs = 0u64;
 
-        let mut best_move: Option<ChessMove> = None;
+        let mut best_move = None;
         let mut best_score = 0;
         let mut depth_reached = 0;
 
         for depth in 1..=max_depth.max(1) {
-            if let Some((deadline, budget)) = timing {
-                if depth > 1 && Instant::now() > deadline - budget / 2 {
+            if let Some(deadline) = deadline {
+                if depth > 1
+                    && deadline.remaining()
+                    < Duration::from_millis(50)
+                {
                     break;
                 }
             }
