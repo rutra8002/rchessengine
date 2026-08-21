@@ -245,7 +245,7 @@ impl Search {
             self.tt.store(
                 hash,
                 depth,
-                best_score,
+                transposition::score_to_tt(best_score, 0),
                 Bound::Exact,
                 best_move,
             );

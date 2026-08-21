@@ -4,10 +4,14 @@ use crate::{
     ordering::ordered_legal_moves,
 };
 
-use super::{quiescence::quiescence, transposition::Bound, Search, SearchStats, GameHistory};
+use super::{
+    quiescence::quiescence,
+    transposition::{score_from_tt, score_to_tt, Bound},
+    Search, SearchStats, GameHistory,
+};
 
 const INF: i32 = i32::MAX / 2;
-const MATE_SCORE: i32 = 900_000;
+const MATE_SCORE: i32 = 67_000_000;
 
 const NULL_MOVE_R: u32 = 2;
 const NULL_MOVE_MIN_DEPTH: u32 = NULL_MOVE_R + 1;
@@ -56,20 +60,22 @@ pub(crate) fn negamax(
         if entry.depth >= depth as i16 {
             stats.tt_hits += 1;
 
+            let adjusted_score = score_from_tt(entry.score, ply);
+
             match entry.bound {
                 Bound::Exact => {
                     stats.tt_cutoffs += 1;
-                    return entry.score;
+                    return adjusted_score;
                 }
 
-                Bound::Lower if entry.score >= beta => {
+                Bound::Lower if adjusted_score >= beta => {
                     stats.tt_cutoffs += 1;
-                    return entry.score;
+                    return adjusted_score;
                 }
 
-                Bound::Upper if entry.score <= alpha => {
+                Bound::Upper if adjusted_score <= alpha => {
                     stats.tt_cutoffs += 1;
-                    return entry.score;
+                    return adjusted_score;
                 }
 
                 _ => {}
@@ -230,7 +236,7 @@ pub(crate) fn negamax(
         search.tt.store(
             hash,
             depth,
-            best,
+            score_to_tt(best, ply),
             bound,
             best_move,
         );

@@ -4,6 +4,31 @@ const TT_BITS: usize = 20;
 const TT_SIZE: usize = 1 << TT_BITS;
 const TT_MASK: usize = TT_SIZE - 1;
 
+const MATE_SCORE: i32 = 67_000_000;
+const MATE_IN_MAX_PLY: i32 = MATE_SCORE - 1000;
+
+#[inline]
+pub(crate) fn score_to_tt(score: i32, ply: i32) -> i32 {
+    if score >= MATE_IN_MAX_PLY {
+        score + ply
+    } else if score <= -MATE_IN_MAX_PLY {
+        score - ply
+    } else {
+        score
+    }
+}
+
+#[inline]
+pub(crate) fn score_from_tt(score: i32, ply: i32) -> i32 {
+    if score >= MATE_IN_MAX_PLY {
+        score - ply
+    } else if score <= -MATE_IN_MAX_PLY {
+        score + ply
+    } else {
+        score
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub(crate) enum Bound {
