@@ -54,7 +54,6 @@ pub(crate) fn negamax(
     }
 
     let in_check = *board.checkers() != EMPTY;
-
     let original_alpha = alpha;
 
     let tt_move = if let Some(entry) = search.tt.probe(hash) {
@@ -123,11 +122,13 @@ pub(crate) fn negamax(
 
     let moves = {
         let side_to_move = board.side_to_move();
+
         let killers_here = search
             .killers
             .get(ply as usize)
             .copied()
             .unwrap_or([None, None]);
+
         let history_table = &search.history_table;
 
         ordered_legal_moves(board, tt_move, killers_here, |m| {
@@ -136,15 +137,18 @@ pub(crate) fn negamax(
     };
 
     if moves.is_empty() {
-        return if in_check { -MATE_SCORE + ply } else { 0 };
+        return if in_check {
+            -MATE_SCORE + ply
+        } else {
+            0
+        };
     }
 
     let mut best = -INF;
     let mut best_move = None;
-    let mut move_index = 0usize;
     let mut quiets_tried: Vec<ChessMove> = Vec::new();
 
-    for m in moves {
+    for (move_index, m) in moves.into_iter().enumerate() {
         let is_capture = board.piece_on(m.get_dest()).is_some();
 
         if !is_capture {
@@ -175,16 +179,16 @@ pub(crate) fn negamax(
                 && depth >= LMR_MIN_DEPTH
                 && move_index >= LMR_MIN_MOVE_INDEX;
 
-            let reduced_depth = if reduce {
+            let searched_depth = if reduce {
                 (depth - 1).saturating_sub(1)
             } else {
                 depth - 1
             };
 
-            let mut s = -negamax(
+            let mut score = -negamax(
                 search,
                 &next,
-                reduced_depth,
+                searched_depth,
                 -alpha - 1,
                 -alpha,
                 ply + 1,
@@ -192,8 +196,21 @@ pub(crate) fn negamax(
                 history,
             );
 
-            if s > alpha && reduced_depth < depth - 1 {
-                s = -negamax(
+            if score > alpha && searched_depth < depth - 1 {
+                score = -negamax(
+                    search,
+                    &next,
+                    depth - 1,
+                    -alpha - 1,
+                    -alpha,
+                    ply + 1,
+                    stats,
+                    history,
+                );
+            }
+
+            if score > alpha && score < beta {
+                score = -negamax(
                     search,
                     &next,
                     depth - 1,
@@ -205,24 +222,10 @@ pub(crate) fn negamax(
                 );
             }
 
-            if s > alpha && s < beta {
-                s = -negamax(
-                    search,
-                    &next,
-                    depth - 1,
-                    -beta,
-                    -alpha,
-                    ply + 1,
-                    stats,
-                    history,
-                );
-            }
-
-            s
+            score
         };
 
         history.pop();
-        move_index += 1;
 
         if stats.stopped {
             return 0;
@@ -253,10 +256,13 @@ pub(crate) fn negamax(
 
         if bound == Bound::Lower {
             if let Some(bm) = best_move {
-                let bm_is_capture = board.piece_on(bm.get_dest()).is_some();
+                let bm_is_capture =
+                    board.piece_on(bm.get_dest()).is_some();
 
                 if !bm_is_capture {
-                    if let Some(killers_here) = search.killers.get_mut(ply as usize) {
+                    if let Some(killers_here) =
+                        search.killers.get_mut(ply as usize)
+                    {
                         record_killer(killers_here, bm);
                     }
 

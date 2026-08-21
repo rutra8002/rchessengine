@@ -1,0 +1,31 @@
+rchessengine benchmark snapshot
+version: 2.6.0
+command: cargo bench -- 10
+
+rchessengine benchmark
+version: 2.6.0
+depth: 10
+positions: 8
+
+startpos           depth 10  nodes      2208685  nps    1468312  tt_hits     75045  tt_cutoffs     38880  score         18  bestmove g1f3
+tactical_1         depth 10  nodes      6023439  nps    1436397  tt_hits    116091  tt_cutoffs     48408  score        358  bestmove c1e3
+tactical_2         depth 10  nodes      3642649  nps    1507718  tt_hits     64416  tt_cutoffs     31530  score         23  bestmove e1g1
+middlegame_1       depth 10  nodes      3930914  nps    1412403  tt_hits     70509  tt_cutoffs     48519  score        -16  bestmove c1f4
+middlegame_2       depth 10  nodes      3214360  nps    1635172  tt_hits     92230  tt_cutoffs     73428  score       1062  bestmove d1e2
+endgame_1          depth 10  nodes        72310  nps    3077946  tt_hits      9705  tt_cutoffs      5083  score        321  bestmove g3f3
+endgame_2          depth 10  nodes        33413  nps    3112939  tt_hits      6686  tt_cutoffs      3581  score       -197  bestmove f3e3
+queen_endgame      depth 10  nodes        72257  nps    2741961  tt_hits      5770  tt_cutoffs      4735  score        885  bestmove d1d5
+
+==============================
+BENCH COMPLETE
+==============================
+version:      2.6.0
+depth:        10
+positions:    8
+total nodes:  19198027
+total time:   12.957s
+total NPS:    1481659
+TT hits:      440452
+TT cutoffs:   254164
+TT hit rate:  2.29%
+TT cutoff:    57.71% of hits

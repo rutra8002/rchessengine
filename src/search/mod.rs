@@ -170,8 +170,7 @@ impl Search {
 
         for depth in 1..=max_depth.max(1) {
             if let Some((deadline, budget)) = timing {
-                if depth > 1 && Instant::now() > deadline - budget / 2
-                {
+                if depth > 1 && Instant::now() > deadline - budget / 2 {
                     break;
                 }
             }
@@ -205,7 +204,9 @@ impl Search {
 
             eprintln!(
                 "info depth {} score {} nodes {}",
-                depth, format_uci_score(root_score), total_nodes
+                depth,
+                format_uci_score(root_score),
+                total_nodes
             );
         }
 
@@ -244,26 +245,55 @@ impl Search {
 
         let moves = {
             let history_table = &self.history_table;
+
             ordered_legal_moves(board, tt_move, killers_here, |m| {
                 history_table.score(side_to_move, m)
             })
         };
 
-        for m in moves {
+        for (move_index, m) in moves.into_iter().enumerate() {
             let next = board.make_move_new(m);
 
             history.push(next.get_hash());
 
-            let score = -negamax::negamax(
-                self,
-                &next,
-                depth.saturating_sub(1),
-                -beta,
-                -alpha,
-                1,
-                stats,
-                history,
-            );
+            let score = if move_index == 0 {
+                -negamax::negamax(
+                    self,
+                    &next,
+                    depth.saturating_sub(1),
+                    -beta,
+                    -alpha,
+                    1,
+                    stats,
+                    history,
+                )
+            } else {
+                let mut score = -negamax::negamax(
+                    self,
+                    &next,
+                    depth.saturating_sub(1),
+                    -alpha - 1,
+                    -alpha,
+                    1,
+                    stats,
+                    history,
+                );
+
+                if score > alpha && score < beta {
+                    score = -negamax::negamax(
+                        self,
+                        &next,
+                        depth.saturating_sub(1),
+                        -beta,
+                        -alpha,
+                        1,
+                        stats,
+                        history,
+                    );
+                }
+
+                score
+            };
 
             history.pop();
 
@@ -278,6 +308,10 @@ impl Search {
 
             if best_score > alpha {
                 alpha = best_score;
+            }
+
+            if alpha >= beta {
+                break;
             }
         }
 
