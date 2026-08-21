@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct GameHistory {
     stack: Vec<u64>,
     counts: HashMap<u64, u32>,

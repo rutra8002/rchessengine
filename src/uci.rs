@@ -132,6 +132,34 @@ fn handle_go(
     io::stdout().flush().ok();
 }
 
+fn handle_setoption(tokens: &[&str], search: &mut Search) {
+    if tokens.first() != Some(&"name") {
+        return;
+    }
+
+    let mut idx = 1;
+    let mut name_parts = Vec::new();
+
+    while idx < tokens.len() && tokens[idx] != "value" {
+        name_parts.push(tokens[idx]);
+        idx += 1;
+    }
+
+    let name = name_parts.join(" ");
+
+    let value = if tokens.get(idx) == Some(&"value") {
+        tokens.get(idx + 1).copied()
+    } else {
+        None
+    };
+
+    if name == "Threads" {
+        if let Some(v) = value.and_then(|v| v.parse::<usize>().ok()) {
+            search.set_threads(v.clamp(1, 64));
+        }
+    }
+}
+
 pub fn run() {
     let mut board = Board::default();
     let mut history = GameHistory::new();
@@ -153,6 +181,7 @@ pub fn run() {
             "uci" => {
                 println!("id name {}", ENGINE_NAME);
                 println!("id author {}", ENGINE_AUTHOR);
+                println!("option name Threads type spin default 1 min 1 max 64");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
@@ -180,6 +209,9 @@ pub fn run() {
                     &tokens[1..],
                     &mut search,
                 );
+            }
+            "setoption" => {
+                handle_setoption(&tokens[1..], &mut search);
             }
             "quit" => break,
             _ => {}

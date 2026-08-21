@@ -102,6 +102,7 @@ fn run_benchmark(depth: u32) -> String {
         // Keep each position isolated so TT contents from one
         // position cannot affect another position's result.
         let mut search = Search::new();
+        search.set_threads(4);
         let mut history = GameHistory::new();
 
         history.push(board.get_hash());

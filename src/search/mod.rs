@@ -4,6 +4,7 @@ mod transposition;
 mod history;
 mod heuristics;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use chess::{Board, ChessMove};
@@ -11,10 +12,7 @@ use chess::{Board, ChessMove};
 use crate::ordering::ordered_legal_moves;
 use crate::time::SearchDeadline;
 
-use transposition::{
-    Bound,
-    TranspositionTable,
-};
+use transposition::{Bound, TranspositionTable};
 
 use heuristics::HistoryHeuristic;
 
@@ -48,6 +46,7 @@ pub fn format_uci_score(score: i32) -> String {
 }
 
 const TIME_CHECK_INTERVAL: u64 = 2048;
+
 pub struct SearchStats {
     pub nodes: u64,
     pub tt_hits: u64,
@@ -86,9 +85,10 @@ impl SearchStats {
 }
 
 pub struct Search {
-    tt: TranspositionTable,
+    tt: Arc<TranspositionTable>,
     pub(crate) killers: Vec<[Option<ChessMove>; 2]>,
     pub(crate) history_table: HistoryHeuristic,
+    threads: usize,
 }
 
 pub struct SearchResult {
@@ -103,12 +103,26 @@ pub struct SearchResult {
 impl Search {
     pub fn new() -> Self {
         Self {
-            tt: TranspositionTable::new(),
+            tt: Arc::new(TranspositionTable::new()),
             killers: vec![[None, None]; MAX_PLY],
             history_table: HistoryHeuristic::new(),
+            threads: 1,
         }
     }
 
+    fn spawn_worker(tt: Arc<TranspositionTable>) -> Self {
+        Self {
+            tt,
+            killers: vec![[None, None]; MAX_PLY],
+            history_table: HistoryHeuristic::new(),
+            threads: 1,
+        }
+    }
+
+    pub fn set_threads(&mut self, threads: usize) {
+        self.threads = threads.max(1);
+    }
+    
     pub fn clear_tt(&mut self) {
         self.tt.clear();
         self.history_table.clear();
@@ -121,8 +135,7 @@ impl Search {
         depth: u32,
         history: &mut GameHistory,
     ) -> (Option<ChessMove>, i32, u64, u64, u64) {
-        let result =
-            self.search_iterative(board, depth, history, None);
+        let result = self.search_iterative_smp(board, depth, history, None);
 
         (
             result.best_move,
@@ -140,15 +153,74 @@ impl Search {
         history: &mut GameHistory,
         time_budget: Duration,
     ) -> SearchResult {
-        let deadline =
-            SearchDeadline::new(time_budget);
+        let deadline = SearchDeadline::new(time_budget);
 
-        self.search_iterative(
-            board,
-            max_depth,
-            history,
-            Some(deadline),
-        )
+        self.search_iterative_smp(board, max_depth, history, Some(deadline))
+    }
+
+    fn search_iterative_smp(
+        &mut self,
+        board: &Board,
+        max_depth: u32,
+        history: &mut GameHistory,
+        deadline: Option<SearchDeadline>,
+    ) -> SearchResult {
+        let helper_count = self.threads.saturating_sub(1);
+
+        if helper_count == 0 {
+            return self.search_iterative(board, max_depth, history, deadline, 0);
+        }
+
+        let mut helpers: Vec<Search> = (0..helper_count)
+            .map(|_| Search::spawn_worker(Arc::clone(&self.tt)))
+            .collect();
+
+        let mut worker_histories: Vec<GameHistory> =
+            (0..helper_count).map(|_| history.clone()).collect();
+
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = helpers
+                .iter_mut()
+                .zip(worker_histories.iter_mut())
+                .enumerate()
+                .map(|(i, (worker, worker_history))| {
+                    let depth_bump = if deadline.is_some() {
+                        ((i + 1) % 2) as u32
+                    } else {
+                        0
+                    };
+                    let worker_depth = (max_depth + depth_bump).min(MAX_DEPTH);
+
+                    scope.spawn(move || {
+                        worker.search_iterative(
+                            board,
+                            worker_depth,
+                            worker_history,
+                            deadline,
+                            i + 1,
+                        )
+                    })
+                })
+                .collect();
+
+            let mut best = self.search_iterative(board, max_depth, history, deadline, 0);
+
+            for handle in handles {
+                if let Ok(result) = handle.join() {
+                    best.nodes += result.nodes;
+                    best.tt_hits += result.tt_hits;
+                    best.tt_cutoffs += result.tt_cutoffs;
+
+                    if result.best_move.is_some() && result.depth_reached > best.depth_reached {
+                        best.best_move = result.best_move;
+                        best.score = result.score;
+                        best.depth_reached = result.depth_reached;
+                    }
+                }
+            }
+
+            best
+        })
     }
 
     fn search_iterative(
@@ -157,6 +229,7 @@ impl Search {
         max_depth: u32,
         history: &mut GameHistory,
         deadline: Option<SearchDeadline>,
+        worker_id: usize,
     ) -> SearchResult {
         self.killers
             .iter_mut()
@@ -209,12 +282,14 @@ impl Search {
                 break;
             }
 
-            eprintln!(
-                "info depth {} score {} nodes {}",
-                depth,
-                format_uci_score(root_score),
-                total_nodes
-            );
+            if worker_id == 0 {
+                eprintln!(
+                    "info depth {} score {} nodes {}",
+                    depth,
+                    format_uci_score(root_score),
+                    total_nodes
+                );
+            }
         }
 
         SearchResult {

@@ -1,4 +1,5 @@
-use chess::ChessMove;
+use chess::{ChessMove, File, Piece, Rank, Square};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const TT_BITS: usize = 20;
 const TT_SIZE: usize = 1 << TT_BITS;
@@ -6,6 +7,8 @@ const TT_MASK: usize = TT_SIZE - 1;
 
 const MATE_SCORE: i32 = 67_000_000;
 const MATE_IN_MAX_PLY: i32 = MATE_SCORE - 1000;
+
+const OCCUPIED_BIT: u64 = 1 << 63;
 
 #[inline]
 pub(crate) fn score_to_tt(score: i32, ply: i32) -> i32 {
@@ -29,7 +32,7 @@ pub(crate) fn score_from_tt(score: i32, ply: i32) -> i32 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub(crate) enum Bound {
     Exact = 0,
@@ -37,39 +40,119 @@ pub(crate) enum Bound {
     Upper = 2,
 }
 
+impl Bound {
+    #[inline]
+    fn from_u8(v: u8) -> Bound {
+        match v {
+            1 => Bound::Lower,
+            2 => Bound::Upper,
+            _ => Bound::Exact,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct TTEntry {
-    pub(crate) key: u64,
     pub(crate) depth: i16,
     pub(crate) score: i32,
     pub(crate) bound: Bound,
     pub(crate) best_move: Option<ChessMove>,
 }
 
-impl Default for TTEntry {
+#[inline]
+fn encode_move(m: Option<ChessMove>) -> u16 {
+    match m {
+        None => 0xFFFF,
+        Some(mv) => {
+            let from = mv.get_source().to_index() as u16 & 0x3F;
+            let to = mv.get_dest().to_index() as u16 & 0x3F;
+
+            let promo: u16 = match mv.get_promotion() {
+                None => 0,
+                Some(Piece::Knight) => 1,
+                Some(Piece::Bishop) => 2,
+                Some(Piece::Rook) => 3,
+                Some(Piece::Queen) => 4,
+                _ => 0,
+            };
+
+            from | (to << 6) | (promo << 12)
+        }
+    }
+}
+
+#[inline]
+fn decode_move(bits: u16) -> Option<ChessMove> {
+    if bits == 0xFFFF {
+        return None;
+    }
+
+    let from = (bits & 0x3F) as usize;
+    let to = ((bits >> 6) & 0x3F) as usize;
+    let promo = (bits >> 12) & 0x7;
+
+    let promotion = match promo {
+        1 => Some(Piece::Knight),
+        2 => Some(Piece::Bishop),
+        3 => Some(Piece::Rook),
+        4 => Some(Piece::Queen),
+        _ => None,
+    };
+
+    let source = Square::make_square(Rank::from_index(from / 8), File::from_index(from % 8));
+    let dest = Square::make_square(Rank::from_index(to / 8), File::from_index(to % 8));
+
+    Some(ChessMove::new(source, dest, promotion))
+}
+
+#[inline]
+fn pack(depth: u32, score: i32, bound: Bound, best_move: Option<ChessMove>) -> u64 {
+    let mv = encode_move(best_move) as u64;
+    let score_bits = (score as u32) as u64;
+    let depth_bits = (depth.min(255) as u64) & 0xFF;
+    let bound_bits = (bound as u64) & 0x3;
+
+    OCCUPIED_BIT | (bound_bits << 56) | (depth_bits << 48) | (score_bits << 16) | mv
+}
+
+#[inline]
+fn unpack(data: u64) -> TTEntry {
+    let mv_bits = (data & 0xFFFF) as u16;
+    let score_bits = ((data >> 16) & 0xFFFF_FFFF) as u32;
+    let depth_bits = ((data >> 48) & 0xFF) as u8;
+    let bound_bits = ((data >> 56) & 0x3) as u8;
+
+    TTEntry {
+        depth: depth_bits as i16,
+        score: score_bits as i32,
+        bound: Bound::from_u8(bound_bits),
+        best_move: decode_move(mv_bits),
+    }
+}
+
+struct Slot {
+    key_xor_data: AtomicU64,
+    data: AtomicU64,
+}
+
+impl Default for Slot {
     fn default() -> Self {
         Self {
-            key: 0,
-            depth: -1,
-            score: 0,
-            bound: Bound::Exact,
-            best_move: None,
+            key_xor_data: AtomicU64::new(0),
+            data: AtomicU64::new(0),
         }
     }
 }
 
 pub(crate) struct TranspositionTable {
-    entries: Vec<TTEntry>,
+    entries: Vec<Slot>,
 }
 
 impl TranspositionTable {
     pub(crate) fn new() -> Self {
-        Self {
-            entries: vec![
-                TTEntry::default();
-                TT_SIZE
-            ],
-        }
+        let mut entries = Vec::with_capacity(TT_SIZE);
+        entries.resize_with(TT_SIZE, Slot::default);
+        Self { entries }
     }
 
     #[inline]
@@ -78,45 +161,59 @@ impl TranspositionTable {
     }
 
     #[inline]
-    pub(crate) fn probe(
-        &self,
-        key: u64,
-    ) -> Option<&TTEntry> {
-        let entry = &self.entries[Self::index(key)];
+    pub(crate) fn probe(&self, key: u64) -> Option<TTEntry> {
+        let slot = &self.entries[Self::index(key)];
 
-        if entry.depth >= 0 && entry.key == key {
-            Some(entry)
-        } else {
-            None
+        let data = slot.data.load(Ordering::Relaxed);
+
+        if data & OCCUPIED_BIT == 0 {
+            return None;
         }
+
+        let key_xor_data = slot.key_xor_data.load(Ordering::Relaxed);
+
+        if (key_xor_data ^ data) != key {
+            return None; // different position, or a torn concurrent write
+        }
+
+        Some(unpack(data))
     }
 
     #[inline]
     pub(crate) fn store(
-        &mut self,
+        &self,
         key: u64,
         depth: u32,
         score: i32,
         bound: Bound,
         best_move: Option<ChessMove>,
     ) {
-        let index = Self::index(key);
-        let old = self.entries[index];
+        let slot = &self.entries[Self::index(key)];
 
-        if old.depth < depth as i16
-            || old.key != key
-        {
-            self.entries[index] = TTEntry {
-                key,
-                depth: depth as i16,
-                score,
-                bound,
-                best_move,
-            };
+        let existing_data = slot.data.load(Ordering::Relaxed);
+
+        if existing_data & OCCUPIED_BIT != 0 {
+            let existing_kxd = slot.key_xor_data.load(Ordering::Relaxed);
+
+            if (existing_kxd ^ existing_data) == key {
+                let existing_depth = (existing_data >> 48) & 0xFF;
+
+                if existing_depth as u32 >= depth {
+                    return; // keep the deeper (or equal) existing entry
+                }
+            }
         }
+
+        let data = pack(depth, score, bound, best_move);
+
+        slot.data.store(data, Ordering::Relaxed);
+        slot.key_xor_data.store(key ^ data, Ordering::Relaxed);
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.entries.fill(TTEntry::default());
+    pub(crate) fn clear(&self) {
+        for slot in &self.entries {
+            slot.data.store(0, Ordering::Relaxed);
+            slot.key_xor_data.store(0, Ordering::Relaxed);
+        }
     }
 }
