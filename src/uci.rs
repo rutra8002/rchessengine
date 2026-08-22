@@ -8,6 +8,10 @@ use std::str::FromStr;
 const ENGINE_NAME: &str = "rchessengine";
 const ENGINE_AUTHOR: &str = "ruter";
 
+const HASH_MIN_MB: usize = 1;
+const HASH_MAX_MB: usize = 4096;
+const HASH_DEFAULT_MB: usize = 256;
+
 fn handle_position(
     board: &mut Board,
     history: &mut GameHistory,
@@ -157,6 +161,10 @@ fn handle_setoption(tokens: &[&str], search: &mut Search) {
         if let Some(v) = value.and_then(|v| v.parse::<usize>().ok()) {
             search.set_threads(v.clamp(1, 64));
         }
+    } else if name == "Hash" {
+        if let Some(v) = value.and_then(|v| v.parse::<usize>().ok()) {
+            search.set_hash_size_mb(v.clamp(HASH_MIN_MB, HASH_MAX_MB));
+        }
     }
 }
 
@@ -182,6 +190,10 @@ pub fn run() {
                 println!("id name {}", ENGINE_NAME);
                 println!("id author {}", ENGINE_AUTHOR);
                 println!("option name Threads type spin default 4 min 1 max 64");
+                println!(
+                    "option name Hash type spin default {} min {} max {}",
+                    HASH_DEFAULT_MB, HASH_MIN_MB, HASH_MAX_MB
+                );
                 println!("uciok");
                 io::stdout().flush().ok();
             }

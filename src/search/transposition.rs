@@ -1,14 +1,14 @@
 use chess::{ChessMove, File, Piece, Rank, Square};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const TT_BITS: usize = 21;
-const TT_SIZE: usize = 1 << TT_BITS;
-const TT_MASK: usize = TT_SIZE - 1;
-
 const MATE_SCORE: i32 = 67_000_000;
 const MATE_IN_MAX_PLY: i32 = MATE_SCORE - 1000;
 
 const OCCUPIED_BIT: u64 = 1 << 63;
+
+pub(crate) const DEFAULT_HASH_MB: usize = 256;
+
+const MIN_HASH_SLOTS: usize = 1024;
 
 #[inline]
 pub(crate) fn score_to_tt(score: i32, ply: i32) -> i32 {
@@ -159,23 +159,47 @@ impl Default for Slot {
 
 pub(crate) struct TranspositionTable {
     entries: Vec<Slot>,
+    mask: usize,
 }
 
 impl TranspositionTable {
+    pub(crate) fn with_size_mb(mb: usize) -> Self {
+        let slots = Self::slots_for_mb(mb);
+
+        let mut entries = Vec::with_capacity(slots);
+        entries.resize_with(slots, Slot::default);
+
+        Self {
+            entries,
+            mask: slots - 1,
+        }
+    }
+
     pub(crate) fn new() -> Self {
-        let mut entries = Vec::with_capacity(TT_SIZE);
-        entries.resize_with(TT_SIZE, Slot::default);
-        Self { entries }
+        Self::with_size_mb(DEFAULT_HASH_MB)
+    }
+
+    fn slots_for_mb(mb: usize) -> usize {
+        let bytes = (mb.max(1) as u64) * 1024 * 1024;
+        let slot_size = std::mem::size_of::<Slot>() as u64;
+        let raw_slots = (bytes / slot_size).max(1);
+
+        let mut slots: u64 = 1;
+        while slots * 2 <= raw_slots {
+            slots *= 2;
+        }
+
+        (slots as usize).max(MIN_HASH_SLOTS)
     }
 
     #[inline]
-    fn index(key: u64) -> usize {
-        (key as usize) & TT_MASK
+    fn index(&self, key: u64) -> usize {
+        (key as usize) & self.mask
     }
 
     #[inline]
     pub(crate) fn probe(&self, key: u64) -> Option<TTEntry> {
-        let slot = &self.entries[Self::index(key)];
+        let slot = &self.entries[self.index(key)];
 
         let data = slot.data.load(Ordering::Relaxed);
 
@@ -201,7 +225,7 @@ impl TranspositionTable {
         bound: Bound,
         best_move: Option<ChessMove>,
     ) {
-        let slot = &self.entries[Self::index(key)];
+        let slot = &self.entries[self.index(key)];
 
         let existing_data = slot.data.load(Ordering::Relaxed);
 
@@ -212,7 +236,7 @@ impl TranspositionTable {
                 let existing_depth = (existing_data >> 48) & 0xFF;
                 let existing_bound =
                     Bound::from_u8(((existing_data >> 56) & 0x3) as u8);
-                
+
                 if existing_depth as u32 > depth
                     || (existing_depth as u32 == depth
                     && existing_bound == Bound::Exact

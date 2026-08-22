@@ -7,11 +7,13 @@ use chess::{
 };
 
 use crate::{
-    evaluation::evaluate_relative,
+    evaluation::{evaluate_relative, piece_value},
     ordering::move_order_score,
 };
 
 use super::{SearchStats, MATE_SCORE};
+
+const DELTA_MARGIN: i32 = 200;
 
 pub(crate) fn quiescence(
     board: &Board,
@@ -41,17 +43,21 @@ pub(crate) fn quiescence(
 
     let in_check = *board.checkers() != EMPTY;
 
-    if !in_check {
-        let stand_pat = evaluate_relative(board);
+    let stand_pat = if !in_check {
+        let sp = evaluate_relative(board);
 
-        if stand_pat >= beta {
+        if sp >= beta {
             return beta;
         }
 
-        if stand_pat > alpha {
-            alpha = stand_pat;
+        if sp > alpha {
+            alpha = sp;
         }
-    }
+
+        Some(sp)
+    } else {
+        None
+    };
 
     let mut moves: Vec<ChessMove> = if in_check {
         MoveGen::new_legal(board).collect()
@@ -62,7 +68,7 @@ pub(crate) fn quiescence(
         movegen.set_iterator_mask(targets);
         movegen.collect()
     };
-    
+
     let mut scored: Vec<(ChessMove, i32)> = moves
         .drain(..)
         .map(|m| {
@@ -74,6 +80,18 @@ pub(crate) fn quiescence(
     scored.sort_unstable_by(|a, b| b.1.cmp(&a.1));
 
     for (m, _) in scored {
+        if let Some(sp) = stand_pat {
+            if m.get_promotion().is_none() {
+                if let Some(victim) = board.piece_on(m.get_dest()) {
+                    let optimistic = sp + piece_value(victim) + DELTA_MARGIN;
+
+                    if optimistic <= alpha {
+                        continue;
+                    }
+                }
+            }
+        }
+
         let next = board.make_move_new(m);
 
         let score = -quiescence(

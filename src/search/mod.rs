@@ -16,7 +16,7 @@ use chess::{Board, ChessMove};
 use crate::ordering::ordered_legal_moves;
 use crate::time::SearchDeadline;
 
-use transposition::{Bound, TranspositionTable};
+use transposition::{Bound, TranspositionTable, DEFAULT_HASH_MB};
 
 use heuristics::HistoryHeuristic;
 
@@ -31,6 +31,8 @@ const INF: i32 = i32::MAX / 2;
 pub(crate) const MATE_SCORE: i32 = 67_000_000;
 
 const MATE_THRESHOLD: i32 = MATE_SCORE - 1000;
+
+const ASPIRATION_WINDOW: i32 = 25;
 
 pub fn format_uci_score(score: i32) -> String {
     if score.abs() >= MATE_THRESHOLD {
@@ -103,6 +105,7 @@ pub struct SearchResult {
 
 pub struct Search {
     tt: Arc<TranspositionTable>,
+    hash_mb: usize,
     pub(crate) killers: Vec<[Option<ChessMove>; 2]>,
     pub(crate) history_table: HistoryHeuristic,
     threads: usize,
@@ -135,6 +138,7 @@ impl Search {
     pub fn new() -> Self {
         Self {
             tt: Arc::new(TranspositionTable::new()),
+            hash_mb: DEFAULT_HASH_MB,
             killers: vec![[None, None]; MAX_PLY],
             history_table: HistoryHeuristic::new(),
             threads: 1,
@@ -145,6 +149,7 @@ impl Search {
     fn spawn_worker(tt: Arc<TranspositionTable>) -> Self {
         Self {
             tt,
+            hash_mb: DEFAULT_HASH_MB,
             killers: vec![[None, None]; MAX_PLY],
             history_table: HistoryHeuristic::new(),
             threads: 1,
@@ -166,6 +171,27 @@ impl Search {
         if threads > 1 {
             self.worker_pool =
                 Some(WorkerPool::new(threads - 1, Arc::clone(&self.tt)));
+        }
+    }
+
+    pub fn set_hash_size_mb(&mut self, mb: usize) {
+        let mb = mb.max(1);
+
+        if mb == self.hash_mb {
+            return;
+        }
+
+        self.shutdown_workers();
+
+        self.tt = Arc::new(TranspositionTable::with_size_mb(mb));
+        self.hash_mb = mb;
+
+        self.killers.iter_mut().for_each(|k| *k = [None, None]);
+        self.history_table.clear();
+
+        if self.threads > 1 {
+            self.worker_pool =
+                Some(WorkerPool::new(self.threads - 1, Arc::clone(&self.tt)));
         }
     }
 
@@ -316,8 +342,14 @@ impl Search {
 
             let mut stats = SearchStats::new(deadline);
 
+            let aspiration = if depth > 1 && depth_reached > 0 {
+                Some(best_score)
+            } else {
+                None
+            };
+
             let (root_move, root_score) =
-                self.search_root(board, depth, history, &mut stats);
+                self.search_root(board, depth, history, &mut stats, aspiration);
 
             total_nodes += stats.nodes;
             total_tt_hits += stats.tt_hits;
@@ -363,9 +395,52 @@ impl Search {
         depth: u32,
         history: &mut GameHistory,
         stats: &mut SearchStats,
+        aspiration: Option<i32>,
     ) -> (Option<ChessMove>, i32) {
-        let mut alpha = -INF;
-        let beta = INF;
+        let mut window = ASPIRATION_WINDOW;
+
+        let (mut alpha, mut beta) = match aspiration {
+            Some(prev) if prev.abs() < MATE_THRESHOLD => {
+                (prev.saturating_sub(window).max(-INF), prev.saturating_add(window).min(INF))
+            }
+            _ => (-INF, INF),
+        };
+
+        loop {
+            let (best_move, best_score) =
+                self.search_root_window(board, depth, history, stats, alpha, beta);
+
+            if stats.stopped {
+                return (best_move, best_score);
+            }
+
+            if best_score <= alpha && alpha > -INF {
+                beta = ((alpha as i64 + beta as i64) / 2) as i32;
+                window = window.saturating_mul(2);
+                alpha = best_score.saturating_sub(window).max(-INF);
+                continue;
+            }
+
+            if best_score >= beta && beta < INF {
+                window = window.saturating_mul(2);
+                beta = best_score.saturating_add(window).min(INF);
+                continue;
+            }
+
+            return (best_move, best_score);
+        }
+    }
+
+    fn search_root_window(
+        &mut self,
+        board: &Board,
+        depth: u32,
+        history: &mut GameHistory,
+        stats: &mut SearchStats,
+        alpha_init: i32,
+        beta: i32,
+    ) -> (Option<ChessMove>, i32) {
+        let mut alpha = alpha_init;
 
         let mut best_move = None;
         let mut best_score = -INF;

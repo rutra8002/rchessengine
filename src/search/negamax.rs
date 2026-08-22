@@ -18,6 +18,10 @@ const NULL_MOVE_MIN_DEPTH: u32 = NULL_MOVE_R + 1;
 const LMR_MIN_DEPTH: u32 = 3;
 const LMR_MIN_MOVE_INDEX: usize = 3;
 
+const CHECK_EXTENSION: u32 = 1;
+
+const MAX_CHECK_EXTENSION_PLY: i32 = 64;
+
 #[inline]
 fn has_non_pawn_material(board: &Board, color: Color) -> bool {
     let pieces = *board.color_combined(color);
@@ -157,13 +161,20 @@ pub(crate) fn negamax(
         let next = board.make_move_new(m);
         let gives_check = *next.checkers() != EMPTY;
 
+        let extension: u32 =
+            if gives_check && ply < MAX_CHECK_EXTENSION_PLY {
+                CHECK_EXTENSION
+            } else {
+                0
+            };
+
         history.push(next.get_hash());
 
         let score = if move_index == 0 {
             -negamax(
                 search,
                 &next,
-                depth - 1,
+                depth - 1 + extension,
                 -beta,
                 -alpha,
                 ply + 1,
@@ -180,7 +191,7 @@ pub(crate) fn negamax(
             let searched_depth = if reduce {
                 (depth - 1).saturating_sub(1)
             } else {
-                depth - 1
+                depth - 1 + extension
             };
 
             let mut score = -negamax(
@@ -194,11 +205,11 @@ pub(crate) fn negamax(
                 history,
             );
 
-            if score > alpha && searched_depth < depth - 1 {
+            if score > alpha && searched_depth < depth - 1 + extension {
                 score = -negamax(
                     search,
                     &next,
-                    depth - 1,
+                    depth - 1 + extension,
                     -alpha - 1,
                     -alpha,
                     ply + 1,
@@ -211,7 +222,7 @@ pub(crate) fn negamax(
                 score = -negamax(
                     search,
                     &next,
-                    depth - 1,
+                    depth - 1 + extension,
                     -beta,
                     -alpha,
                     ply + 1,
