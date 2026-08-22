@@ -5,15 +5,15 @@ use chess::{
     MoveGen,
     EMPTY,
 };
-
 use crate::{
-    evaluation::{evaluate_relative, piece_value},
+    evaluation::{evaluate_relative, piece_value, see::see},
     ordering::move_order_score,
 };
 
 use super::{SearchStats, MATE_SCORE};
 
 const DELTA_MARGIN: i32 = 200;
+const MAX_QS_PLY: i32 = 100;
 
 pub(crate) fn quiescence(
     board: &Board,
@@ -24,9 +24,8 @@ pub(crate) fn quiescence(
 ) -> i32 {
     stats.nodes += 1;
     stats.check_time();
-
-    if stats.stopped {
-        return 0;
+    if stats.stopped || ply >= MAX_QS_PLY {
+        return evaluate_relative(board);
     }
 
     match board.status() {
@@ -69,17 +68,13 @@ pub(crate) fn quiescence(
         movegen.collect()
     };
 
-    let mut scored: Vec<(ChessMove, i32)> = moves
-        .drain(..)
-        .map(|m| {
-            let score = move_order_score(board, m);
-            (m, score)
-        })
-        .collect();
+    moves.sort_unstable_by(|a, b| {
+        let score_a = move_order_score(board, *a);
+        let score_b = move_order_score(board, *b);
+        score_b.cmp(&score_a)
+    });
 
-    scored.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-
-    for (m, _) in scored {
+    for m in moves {
         if let Some(sp) = stand_pat {
             if m.get_promotion().is_none() {
                 if let Some(victim) = board.piece_on(m.get_dest()) {
@@ -88,10 +83,16 @@ pub(crate) fn quiescence(
                     if optimistic <= alpha {
                         continue;
                     }
+                    let attacker = board.piece_on(m.get_source()).unwrap();
+                    let skip_see = piece_value(attacker) <= piece_value(victim);
+                    if !skip_see {
+                        if see(board, m.get_dest(), victim, m.get_source(), attacker) < 0 {
+                            continue;
+                        }
+                    }
                 }
             }
         }
-
         let next = board.make_move_new(m);
 
         let score = -quiescence(
