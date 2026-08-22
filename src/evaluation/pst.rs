@@ -148,7 +148,8 @@ const PHASE_WEIGHT_KNIGHT: i32 = 1;
 const PHASE_WEIGHT_BISHOP: i32 = 1;
 const PHASE_WEIGHT_ROOK: i32 = 2;
 const PHASE_WEIGHT_QUEEN: i32 = 4;
-const TOTAL_PHASE: i32 =
+
+pub(crate) const TOTAL_PHASE: i32 =
     PHASE_WEIGHT_KNIGHT * 4 + PHASE_WEIGHT_BISHOP * 4 + PHASE_WEIGHT_ROOK * 4 + PHASE_WEIGHT_QUEEN * 2;
 
 #[inline]
@@ -159,7 +160,7 @@ fn pst_index(color: Color, file: usize, rank: usize) -> usize {
     }
 }
 
-pub(crate) fn pst_score(board: &Board) -> i32 {
+pub(crate) fn pst_score(board: &Board) -> (i32, i32, i32) {
     let mut mg_score = 0i32;
     let mut eg_score = 0i32;
     let mut phase = 0i32;
@@ -196,6 +197,5 @@ pub(crate) fn pst_score(board: &Board) -> i32 {
     }
 
     let phase = phase.min(TOTAL_PHASE);
-
-    (mg_score * phase + eg_score * (TOTAL_PHASE - phase)) / TOTAL_PHASE
+    (mg_score, eg_score, phase)
 }

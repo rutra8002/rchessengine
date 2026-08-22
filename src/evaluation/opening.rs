@@ -1,7 +1,8 @@
 use chess::{Board, Color, Piece, Square};
 
-pub(crate) fn positional_principles_score(board: &Board) -> i32 {
-    let mut score = 0;
+pub(crate) fn positional_principles_score(board: &Board) -> (i32, i32) {
+    let mut mg_score = 0;
+    let mut eg_score = 0;
 
     let white_pawns = *board.color_combined(Color::White) & *board.pieces(Piece::Pawn);
     let black_pawns = *board.color_combined(Color::Black) & *board.pieces(Piece::Pawn);
@@ -12,20 +13,24 @@ pub(crate) fn positional_principles_score(board: &Board) -> i32 {
     for sq in central_squares {
         let square_bb = chess::BitBoard::from_square(sq);
         if (white_pawns & square_bb).popcnt() > 0 {
-            score += 15;
+            mg_score += 15;
+            eg_score += 15;
         }
         if (black_pawns & square_bb).popcnt() > 0 {
-            score -= 15;
+            mg_score -= 15;
+            eg_score -= 15;
         }
     }
 
     for sq in extended_center {
         let square_bb = chess::BitBoard::from_square(sq);
         if (white_pawns & square_bb).popcnt() > 0 {
-            score += 5;
+            mg_score += 5;
+            eg_score += 5;
         }
         if (black_pawns & square_bb).popcnt() > 0 {
-            score -= 5;
+            mg_score -= 5;
+            eg_score -= 5;
         }
     }
 
@@ -33,12 +38,12 @@ pub(crate) fn positional_principles_score(board: &Board) -> i32 {
     let black_king_sq = board.king_square(Color::Black);
 
     if white_king_sq == Square::G1 || white_king_sq == Square::C1 {
-        score += 40;
+        mg_score += 40;
     }
 
     if black_king_sq == Square::G8 || black_king_sq == Square::C8 {
-        score -= 40; 
+        mg_score -= 40;
     }
 
-    score
+    (mg_score, eg_score)
 }

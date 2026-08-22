@@ -9,7 +9,7 @@ use chess::{
     EMPTY,
 };
 
-pub(crate) fn mobility_score(board: &Board) -> i32 {
+pub(crate) fn mobility_score(board: &Board) -> (i32, i32) {
     let occupied = *board.combined();
 
     let white_pieces = *board.color_combined(Color::White);
@@ -34,24 +34,10 @@ pub(crate) fn mobility_score(board: &Board) -> i32 {
 
         let attacks = match piece {
             Piece::Knight => get_knight_moves(sq),
-
-            Piece::Bishop => {
-                get_bishop_moves(sq, occupied)
-            }
-
-            Piece::Rook => {
-                get_rook_moves(sq, occupied)
-            }
-
-            Piece::Queen => {
-                get_bishop_moves(sq, occupied)
-                    | get_rook_moves(sq, occupied)
-            }
-
-            Piece::King => {
-                get_king_moves(sq)
-            }
-
+            Piece::Bishop => get_bishop_moves(sq, occupied),
+            Piece::Rook => get_rook_moves(sq, occupied),
+            Piece::Queen => get_bishop_moves(sq, occupied) | get_rook_moves(sq, occupied),
+            Piece::King => get_king_moves(sq),
             Piece::Pawn => EMPTY,
         };
 
@@ -64,5 +50,7 @@ pub(crate) fn mobility_score(board: &Board) -> i32 {
         }
     }
 
-    white_mobility - black_mobility
+    let score = white_mobility - black_mobility;
+
+    (score, score)
 }

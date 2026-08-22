@@ -1,8 +1,5 @@
 use chess::{BitBoard, Board, Color, File, Piece, Square};
 
-const MG_WEIGHT: i32 = 256;
-const EG_WEIGHT: i32 = 64;
-
 const PAWN_SHIELD_BONUS: i32 = 18;
 const MISSING_SHIELD_PENALTY: i32 = 12;
 
@@ -15,10 +12,6 @@ const KING_ZONE_ATTACK_BONUS: i32 = 4;
 const CENTER_KING_PENALTY: i32 = 18;
 const CASTLED_KING_BONUS: i32 = 12;
 
-#[inline]
-fn blend(mg: i32, eg: i32) -> i32 {
-    (mg * MG_WEIGHT + eg * EG_WEIGHT) / (MG_WEIGHT + EG_WEIGHT)
-}
 
 #[inline]
 fn file_mask(file: File) -> BitBoard {
@@ -161,35 +154,17 @@ fn king_file_pressure(
 }
 
 #[inline]
-fn king_attack_pressure(
-    board: &Board,
-    color: Color,
-    king: Square,
-) -> i32 {
+fn king_attack_pressure(board: &Board, color: Color, king: Square) -> i32 {
     let enemy = !color;
 
     let zone = king_zone(king);
     let ring = king_ring(king);
 
-    let enemy_pawns =
-        *board.color_combined(enemy)
-            & *board.pieces(Piece::Pawn);
-
-    let enemy_knights =
-        *board.color_combined(enemy)
-            & *board.pieces(Piece::Knight);
-
-    let enemy_bishops =
-        *board.color_combined(enemy)
-            & *board.pieces(Piece::Bishop);
-
-    let enemy_rooks =
-        *board.color_combined(enemy)
-            & *board.pieces(Piece::Rook);
-
-    let enemy_queens =
-        *board.color_combined(enemy)
-            & *board.pieces(Piece::Queen);
+    let enemy_pawns = *board.color_combined(enemy) & *board.pieces(Piece::Pawn);
+    let enemy_knights = *board.color_combined(enemy) & *board.pieces(Piece::Knight);
+    let enemy_bishops = *board.color_combined(enemy) & *board.pieces(Piece::Bishop);
+    let enemy_rooks = *board.color_combined(enemy) & *board.pieces(Piece::Rook);
+    let enemy_queens = *board.color_combined(enemy) & *board.pieces(Piece::Queen);
 
     let mut pressure = 0;
 
@@ -327,47 +302,19 @@ fn central_king_penalty(
 }
 
 #[inline]
-fn king_safety_for(
-    board: &Board,
-    color: Color,
-) -> (i32, i32) {
+fn king_safety_for(board: &Board, color: Color) -> (i32, i32) {
     let king = board.king_square(color);
 
     let mut mg = 0;
-    let mut eg = 0;
 
+    mg += pawn_shield_score(board, color, king);
+    mg += king_file_pressure(board, color, king);
+    mg -= king_attack_pressure(board, color, king);
 
-    mg += pawn_shield_score(
-        board,
-        color,
-        king,
-    );
-
-
-    mg += king_file_pressure(
-        board,
-        color,
-        king,
-    );
-
-
-    mg -= king_attack_pressure(
-        board,
-        color,
-        king,
-    );
-
-
-    let castled =
-        match color {
-            Color::White =>
-                king == Square::G1
-                    || king == Square::C1,
-
-            Color::Black =>
-                king == Square::G8
-                    || king == Square::C8,
-        };
+    let castled = match color {
+        Color::White => king == Square::G1 || king == Square::C1,
+        Color::Black => king == Square::G8 || king == Square::C8,
+    };
 
     if castled {
         mg += CASTLED_KING_BONUS;
@@ -379,31 +326,12 @@ fn king_safety_for(
         color,
     );
 
-    eg /= 4;
-
-    (mg, eg)
+    (mg, mg / 4)
 }
 
-pub(crate) fn king_safety_score(
-    board: &Board,
-) -> i32 {
-    let (white_mg, white_eg) =
-        king_safety_for(
-            board,
-            Color::White,
-        );
+pub(crate) fn king_safety_score(board: &Board) -> (i32, i32) {
+    let (white_mg, white_eg) = king_safety_for(board, Color::White);
+    let (black_mg, black_eg) = king_safety_for(board, Color::Black);
 
-    let (black_mg, black_eg) =
-        king_safety_for(
-            board,
-            Color::Black,
-        );
-
-    let white =
-        blend(white_mg, white_eg);
-
-    let black =
-        blend(black_mg, black_eg);
-
-    white - black
+    (white_mg - black_mg, white_eg - black_eg)
 }

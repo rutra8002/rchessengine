@@ -1,26 +1,6 @@
 use chess::{Board, Color, Piece, Square};
 
-pub(crate) fn phase_aware_evaluation(board: &Board) -> i32 {
-    let mut non_pawn_material = 0;
-    for sq in *board.combined() {
-        if let Some(piece) = board.piece_on(sq) {
-            match piece {
-                Piece::Knight | Piece::Bishop => non_pawn_material += 1,
-                Piece::Rook => non_pawn_material += 2,
-                Piece::Queen => non_pawn_material += 4,
-                _ => {}
-            }
-        }
-    }
-
-    if non_pawn_material <= 6 {
-        evaluate_endgame(board)
-    } else {
-        0
-    }
-}
-
-fn evaluate_endgame(board: &Board) -> i32 {
+pub(crate) fn endgame_score(board: &Board) -> (i32, i32) {
     let mut score = 0;
 
     let white_king = board.king_square(Color::White);
@@ -52,7 +32,7 @@ fn evaluate_endgame(board: &Board) -> i32 {
         }
     }
 
-    score
+    (0, score)
 }
 
 fn distance(sq1: Square, sq2: Square) -> i32 {
