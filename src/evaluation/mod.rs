@@ -39,7 +39,7 @@ pub(crate) fn hanging_piece_penalty(board: &Board) -> i32 {
     let black_pawns = *board.color_combined(Color::Black) & *board.pieces(Piece::Pawn);
     for sq in white_pieces {
         let piece = board.piece_on(sq).unwrap();
-        if (pawn_attacks_to(sq, Color::White) & black_pawns).popcnt() > 0 {
+        if (pawn_attacks_to(sq, Color::Black) & black_pawns).popcnt() > 0 {
             score -= piece_value(piece) / 2;
         }
     }
@@ -48,7 +48,7 @@ pub(crate) fn hanging_piece_penalty(board: &Board) -> i32 {
     let white_pawns = *board.color_combined(Color::White) & *board.pieces(Piece::Pawn);
     for sq in black_pieces {
         let piece = board.piece_on(sq).unwrap();
-        if (pawn_attacks_to(sq, Color::Black) & white_pawns).popcnt() > 0 {
+        if (pawn_attacks_to(sq, Color::White) & white_pawns).popcnt() > 0 {
             score += piece_value(piece) / 2;
         }
     }
