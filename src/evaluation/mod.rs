@@ -3,6 +3,7 @@ mod mobility;
 mod king_safety;
 mod opening;
 mod endgame;
+mod structure;
 pub mod pst;
 pub mod see;
 
@@ -58,15 +59,17 @@ pub(crate) fn hanging_piece_penalty(board: &Board) -> i32 {
 
 pub(crate) fn evaluate(board: &Board) -> i32 {
     let material = material::material_score(board);
+    let bishop_pair = material::bishop_pair_score(board);
     let (mob_mg, mob_eg) = mobility::mobility_score(board);
     let (ks_mg, ks_eg) = king_safety::king_safety_score(board);
     let (pos_mg, pos_eg) = opening::positional_principles_score(board);
     let (end_mg, end_eg) = endgame::endgame_score(board);
+    let (str_mg, str_eg) = structure::structure_score(board);
     let (pst_mg, pst_eg, phase) = pst::pst_score(board);
     let threats = hanging_piece_penalty(board);
 
-    let mg_total = material + (2 * mob_mg) + ks_mg + pos_mg + end_mg + pst_mg + threats;
-    let eg_total = material + (2 * mob_eg) + ks_eg + pos_eg + end_eg + pst_eg + threats;
+    let mg_total = material + bishop_pair + (2 * mob_mg) + ks_mg + pos_mg + end_mg + str_mg + pst_mg + threats;
+    let eg_total = material + bishop_pair + (2 * mob_eg) + ks_eg + pos_eg + end_eg + str_eg + pst_eg + threats;
 
     (mg_total * phase + eg_total * (pst::TOTAL_PHASE - phase)) / pst::TOTAL_PHASE
 }

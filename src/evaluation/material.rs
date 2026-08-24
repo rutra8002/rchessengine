@@ -11,6 +11,8 @@ pub(crate) fn piece_value(piece: Piece) -> i32 {
     }
 }
 
+const BISHOP_PAIR_BONUS: i32 = 30;
+
 pub(crate) fn material_score(board: &Board) -> i32 {
     let mut score = 0;
 
@@ -25,6 +27,25 @@ pub(crate) fn material_score(board: &Board) -> i32 {
                 -value
             };
         }
+    }
+
+    score
+}
+
+pub(crate) fn bishop_pair_score(board: &Board) -> i32 {
+    let white_bishops =
+        (*board.color_combined(Color::White) & *board.pieces(Piece::Bishop)).popcnt();
+    let black_bishops =
+        (*board.color_combined(Color::Black) & *board.pieces(Piece::Bishop)).popcnt();
+
+    let mut score = 0;
+
+    if white_bishops >= 2 {
+        score += BISHOP_PAIR_BONUS;
+    }
+
+    if black_bishops >= 2 {
+        score -= BISHOP_PAIR_BONUS;
     }
 
     score
