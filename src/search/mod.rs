@@ -527,12 +527,20 @@ impl Search {
             }
         }
 
+        let bound = if best_score <= alpha_init {
+            Bound::Upper
+        } else if best_score >= beta {
+            Bound::Lower
+        } else {
+            Bound::Exact
+        };
+
         if !stats.stopped {
             self.tt.store(
                 hash,
                 depth,
                 transposition::score_to_tt(best_score, 0),
-                Bound::Exact,
+                bound,
                 best_move,
             );
         }
