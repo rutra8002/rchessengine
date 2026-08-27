@@ -1,5 +1,6 @@
 use chess::{Board, ChessMove, Color, Piece, EMPTY};
 
+use crate::evaluation::{piece_value, see::see};
 use crate::ordering::ordered_legal_moves;
 
 use super::{
@@ -21,6 +22,9 @@ const LMR_MIN_MOVE_INDEX: usize = 3;
 const CHECK_EXTENSION: u32 = 1;
 
 const MAX_CHECK_EXTENSION_PLY: i32 = 64;
+
+const SEE_PRUNE_MAX_DEPTH: u32 = 8;
+const SEE_PRUNE_MARGIN_PER_PLY: i32 = -90;
 
 #[inline]
 fn has_non_pawn_material(board: &Board, color: Color) -> bool {
@@ -151,8 +155,31 @@ pub(crate) fn negamax(
     let mut best_move = None;
     let mut quiets_tried: Vec<ChessMove> = Vec::new();
 
+    let is_pv_node = beta - alpha > 1;
+
     for (move_index, m) in moves.into_iter().enumerate() {
         let is_capture = board.piece_on(m.get_dest()).is_some();
+
+        if is_capture
+            && move_index > 0
+            && !is_pv_node
+            && !in_check
+            && depth <= SEE_PRUNE_MAX_DEPTH
+            && m.get_promotion().is_none()
+        {
+            let victim = board.piece_on(m.get_dest()).unwrap();
+            let attacker = board.piece_on(m.get_source()).unwrap();
+
+            let skip_see = piece_value(attacker) <= piece_value(victim);
+
+            if !skip_see {
+                let gain = see(board, m.get_dest(), victim, m.get_source(), attacker);
+
+                if gain < SEE_PRUNE_MARGIN_PER_PLY * depth as i32 {
+                    continue;
+                }
+            }
+        }
 
         if !is_capture {
             quiets_tried.push(m);
