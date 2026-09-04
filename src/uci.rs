@@ -1,3 +1,4 @@
+use crate::book::OpeningBook;
 use crate::search::{format_uci_score, GameHistory, Search, MAX_DEPTH};
 use crate::time::{compute_time_budget, parse_go_params, phase_factor};
 
@@ -10,7 +11,9 @@ const ENGINE_AUTHOR: &str = "ruter";
 
 const HASH_MIN_MB: usize = 1;
 const HASH_MAX_MB: usize = 4096;
-const HASH_DEFAULT_MB: usize = 256;
+const HASH_DEFAULT_MB: usize = 1024;
+
+const EMBEDDED_BOOK: &[u8] = include_bytes!("../gm2001.bin");
 
 fn handle_position(
     board: &mut Board,
@@ -75,7 +78,20 @@ fn handle_go(
     history: &mut GameHistory,
     tokens: &[&str],
     search: &mut Search,
+    book: &mut Option<OpeningBook>,
+    own_book: bool,
 ) {
+    if own_book {
+        if let Some(b) = book.as_mut() {
+            if let Some(m) = b.probe(board) {
+                println!("info string book move");
+                println!("bestmove {}", m);
+                io::stdout().flush().ok();
+                return;
+            }
+        }
+    }
+
     let params = parse_go_params(tokens);
 
     if let Some(depth) = params.depth {
@@ -136,7 +152,12 @@ fn handle_go(
     io::stdout().flush().ok();
 }
 
-fn handle_setoption(tokens: &[&str], search: &mut Search) {
+fn handle_setoption(
+    tokens: &[&str],
+    search: &mut Search,
+    book: &mut Option<OpeningBook>,
+    own_book: &mut bool,
+) {
     if tokens.first() != Some(&"name") {
         return;
     }
@@ -152,18 +173,26 @@ fn handle_setoption(tokens: &[&str], search: &mut Search) {
     let name = name_parts.join(" ");
 
     let value = if tokens.get(idx) == Some(&"value") {
-        tokens.get(idx + 1).copied()
+        Some(tokens[idx + 1..].join(" "))
     } else {
         None
     };
 
     if name == "Threads" {
-        if let Some(v) = value.and_then(|v| v.parse::<usize>().ok()) {
+        if let Some(v) = value.as_deref().and_then(|v| v.parse::<usize>().ok()) {
             search.set_threads(v.clamp(1, 64));
         }
     } else if name == "Hash" {
-        if let Some(v) = value.and_then(|v| v.parse::<usize>().ok()) {
+        if let Some(v) = value.as_deref().and_then(|v| v.parse::<usize>().ok()) {
             search.set_hash_size_mb(v.clamp(HASH_MIN_MB, HASH_MAX_MB));
+        }
+    } else if name == "OwnBook" {
+        if let Some(v) = value.as_deref() {
+            *own_book = v.eq_ignore_ascii_case("true");
+        }
+    } else if name == "BookFile" {
+        if let Some(v) = value {
+            *book = OpeningBook::load(&v).or_else(|| OpeningBook::from_bytes(EMBEDDED_BOOK));
         }
     }
 }
@@ -174,6 +203,9 @@ pub fn run() {
     history.push(board.get_hash());
     let mut search = Search::new();
     let stdin = io::stdin();
+
+    let mut own_book = true;
+    let mut book = OpeningBook::from_bytes(EMBEDDED_BOOK);
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -194,6 +226,8 @@ pub fn run() {
                     "option name Hash type spin default {} min {} max {}",
                     HASH_DEFAULT_MB, HASH_MIN_MB, HASH_MAX_MB
                 );
+                println!("option name OwnBook type check default true");
+                println!("option name BookFile type string default <embedded>");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
@@ -220,10 +254,17 @@ pub fn run() {
                     &mut history,
                     &tokens[1..],
                     &mut search,
+                    &mut book,
+                    own_book,
                 );
             }
             "setoption" => {
-                handle_setoption(&tokens[1..], &mut search);
+                handle_setoption(
+                    &tokens[1..],
+                    &mut search,
+                    &mut book,
+                    &mut own_book,
+                );
             }
             "quit" => break,
             _ => {}
